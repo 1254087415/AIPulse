@@ -158,3 +158,25 @@ data/processed/
 # Local Claude/ECC configuration and drafts
 .claude/
 docs/
+
+# Environment variable variants
+.env.*
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Temporary directories and PID files
+tmp/
+temp/
+*.pid
+
+# Frontend dependencies and build output (Next.js / Node)
+node_modules/
+.next/
+out/
+
+# Playwright E2E artifacts
+storage/
+test-results/
+playwright-report/
