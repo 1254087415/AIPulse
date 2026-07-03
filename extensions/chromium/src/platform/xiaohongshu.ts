@@ -1,12 +1,18 @@
 import type { FoundLink } from '../types';
+import { extractMatches } from './_helpers';
 
 const XHS_PATTERNS = [
-  /https?:\/\/www\.xiaohongshu\.com\/explore\/[\w]+/i,
-  /https?:\/\/xhslink\.com\/[\w]+/i,
+  {
+    pattern: /https?:\/\/(?:www\.)?xiaohongshu\.com\/explore\/[\w]+/i,
+    platform: 'xiaohongshu' as const,
+  },
+  {
+    pattern: /https?:\/\/xhslink\.com\/[\w]+/i,
+    platform: 'xiaohongshu' as const,
+  },
 ];
 
 export function extractXiaohongshuLinks(document: Document, url: string): FoundLink[] {
-  const links: FoundLink[] = [];
   const candidates = new Set<string>();
   candidates.add(url);
 
@@ -14,19 +20,5 @@ export function extractXiaohongshuLinks(document: Document, url: string): FoundL
     candidates.add(anchor.getAttribute('href') || '');
   }
 
-  for (const candidate of candidates) {
-    for (const pattern of XHS_PATTERNS) {
-      const match = candidate.match(pattern);
-      if (match) {
-        links.push({
-          url: match[0],
-          platform: 'xiaohongshu',
-          title: document.title || undefined,
-        });
-        break;
-      }
-    }
-  }
-
-  return links;
+  return extractMatches(candidates, XHS_PATTERNS, document.title);
 }

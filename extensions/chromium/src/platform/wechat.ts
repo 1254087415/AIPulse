@@ -1,9 +1,9 @@
 import type { FoundLink } from '../types';
+import { extractMatches } from './_helpers';
 
 const WECHAT_PATTERN = /https?:\/\/mp\.weixin\.qq\.com\/s\/[\w\-=]+/i;
 
 export function extractWechatLinks(document: Document, url: string): FoundLink[] {
-  const links: FoundLink[] = [];
   const candidates = new Set<string>();
   candidates.add(url);
 
@@ -11,16 +11,9 @@ export function extractWechatLinks(document: Document, url: string): FoundLink[]
     candidates.add(anchor.getAttribute('href') || '');
   }
 
-  for (const candidate of candidates) {
-    const match = candidate.match(WECHAT_PATTERN);
-    if (match) {
-      links.push({
-        url: match[0],
-        platform: 'wechat',
-        title: document.title || undefined,
-      });
-    }
-  }
-
-  return links;
+  return extractMatches(
+    candidates,
+    [{ pattern: WECHAT_PATTERN, platform: 'wechat' }],
+    document.title
+  );
 }

@@ -1,9 +1,19 @@
 import type { FoundLink } from '../types';
+import { extractMatches } from './_helpers';
 
-const DOUYIN_VIDEO_PATTERN = /https?:\/\/www\.douyin\.com\/video\/(\d+)/i;
+const DOUYIN_PATTERNS = [
+  {
+    pattern: /https?:\/\/v\.douyin\.com\/[\w]+/i,
+    platform: 'douyin' as const,
+  },
+  {
+    pattern: /https?:\/\/(?:www\.)?douyin\.com\/video\/(\d+)/i,
+    platform: 'douyin' as const,
+    transform: (match: RegExpMatchArray) => `https://www.douyin.com/video/${match[1]}`,
+  },
+];
 
 export function extractDouyinLinks(document: Document, url: string): FoundLink[] {
-  const links: FoundLink[] = [];
   const candidates = new Set<string>();
   candidates.add(url);
 
@@ -19,16 +29,5 @@ export function extractDouyinLinks(document: Document, url: string): FoundLink[]
     }
   }
 
-  for (const candidate of candidates) {
-    const match = candidate.match(DOUYIN_VIDEO_PATTERN);
-    if (match) {
-      links.push({
-        url: `https://www.douyin.com/video/${match[1]}`,
-        platform: 'douyin',
-        title: document.title || undefined,
-      });
-    }
-  }
-
-  return links;
+  return extractMatches(candidates, DOUYIN_PATTERNS, document.title);
 }
