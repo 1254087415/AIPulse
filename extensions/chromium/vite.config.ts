@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     webExtension({
       manifest: 'manifest.json',
-      additionalInputs: ['src/content.ts', 'src/context.ts'],
+      additionalInputs: ['src/content.ts', 'src/context.ts', 'src/background.ts'],
     }),
   ],
   build: {
