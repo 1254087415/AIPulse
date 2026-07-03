@@ -1,9 +1,11 @@
 import type { FoundLink } from '../types';
 import { extractMatches } from './_helpers';
 
+const DOUYIN_SHORT_LINK_PATTERN = /https?:\/\/v\.douyin\.com\/[\w]+/i;
+
 const DOUYIN_PATTERNS = [
   {
-    pattern: /https?:\/\/v\.douyin\.com\/[\w]+/i,
+    pattern: DOUYIN_SHORT_LINK_PATTERN,
     platform: 'douyin' as const,
   },
   {
@@ -23,7 +25,7 @@ export function extractDouyinLinks(document: Document, url: string): FoundLink[]
 
   for (const script of document.querySelectorAll('script')) {
     const text = script.textContent || '';
-    const shareMatch = text.match(/https?:\/\/v\.douyin\.com\/[\w]+/i);
+    const shareMatch = text.match(DOUYIN_SHORT_LINK_PATTERN);
     if (shareMatch) {
       candidates.add(shareMatch[0]);
     }
