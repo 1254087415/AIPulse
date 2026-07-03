@@ -330,10 +330,13 @@ class Sidecar:
     ) -> None:
         """Emit a task_complete notification."""
         cached = self._tasks.get(task_id, {})
-        cached["status"] = status
-        cached["progress_pct"] = (
-            100 if status == "success" else cached.get("progress_pct", 0)
-        )
+        self._tasks[task_id] = {
+            **cached,
+            "status": status,
+            "progress_pct": (
+                100 if status == "success" else cached.get("progress_pct", 0)
+            ),
+        }
         self._emit_notification(
             "task_complete",
             {
