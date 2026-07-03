@@ -23,6 +23,7 @@ from aipulse.core.rpc import JsonRpcRequest, JsonRpcResponse
 from aipulse.core.video_pipeline import VideoPipeline
 from aipulse.store.database import close_db, get_session_maker, init_db
 from aipulse.store.repository import TaskRepository
+from pydantic import ValidationError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,7 +86,12 @@ class Sidecar:
     ) -> JsonRpcResponse | None:
         """Dispatch incoming JSON-RPC requests."""
         if isinstance(request, dict):
-            request = JsonRpcRequest.model_validate(request)
+            try:
+                request = JsonRpcRequest.model_validate(request)
+            except ValidationError:
+                return JsonRpcResponse.failure(
+                    request.get("id"), -32600, "invalid request"
+                )
         handlers = {
             "submit_url": self._submit_url,
             "get_task_status": self._get_task_status,
@@ -103,9 +109,7 @@ class Sidecar:
             return JsonRpcResponse.success(request.id, result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Handler %s failed", request.method)
-            return JsonRpcResponse.failure(
-                request.id, -32603, f"internal error: {exc}"
-            )
+            return JsonRpcResponse.failure(request.id, -32603, f"internal error: {exc}")
 
     async def _submit_url(self, params: dict[str, Any]) -> dict[str, Any]:
         url = params.get("url")
@@ -122,7 +126,6 @@ class Sidecar:
                 content_type=str(content_type_hint or "unknown"),
                 source=str(source),
             )
-            task.metadata = {"mode": str(mode)}
             await session.commit()
             task_id = task.id
         self._tasks[task_id] = {
@@ -131,6 +134,7 @@ class Sidecar:
             "status": "pending",
             "progress_pct": 0,
             "message": "任务已提交",
+            "source": str(source),
             "mode": str(mode),
         }
         self._spawn_pipeline(task_id, str(url))
@@ -226,7 +230,9 @@ class Sidecar:
             await pipeline.run(ctx)
             await self._update_task_status(task_id, "completed")
             await self._persist_task_result(task_id, ctx)
-            await self.emit_complete(task_id, "success", {"url": url, "title": ctx.metadata.get("title")})
+            await self.emit_complete(
+                task_id, "success", {"url": url, "title": ctx.metadata.get("title")}
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Pipeline failed for task %s", task_id)
             error_message = str(exc)
@@ -256,7 +262,9 @@ class Sidecar:
             repo = TaskRepository(session)
             fields: dict[str, Any] = {
                 "title": ctx.metadata.get("title"),
-                "raw_content_path": str(ctx.downloaded_path) if ctx.downloaded_path else None,
+                "raw_content_path": (
+                    str(ctx.downloaded_path) if ctx.downloaded_path else None
+                ),
                 "transcript": ctx.transcript,
                 "summary": ctx.summary.raw_markdown if ctx.summary else None,
                 "key_moments": ctx.summary.key_points if ctx.summary else None,
@@ -313,7 +321,9 @@ class Sidecar:
         """Emit a task_complete notification."""
         cached = self._tasks.get(task_id, {})
         cached["status"] = status
-        cached["progress_pct"] = 100 if status == "success" else cached.get("progress_pct", 0)
+        cached["progress_pct"] = (
+            100 if status == "success" else cached.get("progress_pct", 0)
+        )
         self._emit_notification(
             "task_complete",
             {
@@ -355,9 +365,7 @@ async def main() -> None:
                 data = json.loads(line.decode("utf-8"))
                 request = JsonRpcRequest.model_validate(data)
             except json.JSONDecodeError as exc:
-                response = JsonRpcResponse.failure(
-                    None, -32700, f"parse error: {exc}"
-                )
+                response = JsonRpcResponse.failure(None, -32700, f"parse error: {exc}")
             except Exception as exc:  # noqa: BLE001
                 response = JsonRpcResponse.failure(
                     None, -32600, f"invalid request: {exc}"
@@ -368,9 +376,7 @@ async def main() -> None:
                     continue
 
             if response is not None:
-                sys.stdout.write(
-                    response.model_dump_json(exclude_none=True) + "\n"
-                )
+                sys.stdout.write(response.model_dump_json(exclude_none=True) + "\n")
                 sys.stdout.flush()
     finally:
         await sidecar.shutdown()
