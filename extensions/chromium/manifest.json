@@ -1,0 +1,6 @@
+{
+  "manifest_version": 3,
+  "name": "AIPulse Clipper",
+  "version": "0.1.0",
+  "description": "一键提取网页视频/文章链接到 AIPulse 知识库"
+}
