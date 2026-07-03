@@ -3,6 +3,19 @@
   "name": "AIPulse Clipper",
   "version": "0.1.0",
   "description": "一键提取网页视频/文章链接到 AIPulse 知识库",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
   "background": {
     "service_worker": "src/background.ts",
     "type": "module"
