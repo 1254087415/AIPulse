@@ -154,6 +154,7 @@ config/local*.json
 logs/
 data/raw/
 data/processed/
+data/downloads/
 
 # Local Claude/ECC configuration and drafts
 .claude/
