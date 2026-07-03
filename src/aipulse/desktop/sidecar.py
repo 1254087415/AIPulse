@@ -80,8 +80,12 @@ class Sidecar:
         self._write_line: Any | None = None
         self._running_tasks: set[asyncio.Task[None]] = set()
 
-    async def handle_request(self, request: JsonRpcRequest) -> JsonRpcResponse | None:
+    async def handle_request(
+        self, request: JsonRpcRequest | dict[str, Any]
+    ) -> JsonRpcResponse | None:
         """Dispatch incoming JSON-RPC requests."""
+        if isinstance(request, dict):
+            request = JsonRpcRequest.model_validate(request)
         handlers = {
             "submit_url": self._submit_url,
             "get_task_status": self._get_task_status,
@@ -109,6 +113,7 @@ class Sidecar:
             raise ValueError("url is required")
         content_type_hint = params.get("content_type_hint")
         source = params.get("source", "menubar")
+        mode = params.get("mode", "archive")
         session_maker = get_session_maker()
         async with session_maker() as session:
             repo = TaskRepository(session)
@@ -117,6 +122,7 @@ class Sidecar:
                 content_type=str(content_type_hint or "unknown"),
                 source=str(source),
             )
+            task.metadata = {"mode": str(mode)}
             await session.commit()
             task_id = task.id
         self._tasks[task_id] = {
@@ -125,6 +131,7 @@ class Sidecar:
             "status": "pending",
             "progress_pct": 0,
             "message": "任务已提交",
+            "mode": str(mode),
         }
         self._spawn_pipeline(task_id, str(url))
         return {"task_id": task_id, "url": str(url)}
