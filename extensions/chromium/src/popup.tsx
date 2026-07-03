@@ -12,12 +12,20 @@ function Popup() {
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        setStatus(`失败: ${chrome.runtime.lastError.message}`);
+        return;
+      }
       const url = tabs[0]?.url || '';
       setTabUrl(url);
       setSelectedUrl(url);
     });
 
     chrome.runtime.sendMessage({ type: 'GET_FOUND_LINKS' }, (response) => {
+      if (chrome.runtime.lastError) {
+        setStatus(`失败: ${chrome.runtime.lastError.message}`);
+        return;
+      }
       if (response?.links) {
         setLinks(response.links);
       }
@@ -40,7 +48,7 @@ function Popup() {
         setStatus(`失败: ${result.error || '请启动 AIPulse 桌面应用'}`);
       }
     } catch (err) {
-      setStatus(`失败: ${(err as Error).message}`);
+      setStatus(`失败: ${err instanceof Error ? err.message : '未知错误'}`);
     } finally {
       setLoading(false);
     }
@@ -49,18 +57,27 @@ function Popup() {
   return (
     <div className="popup-container">
       <h1>AIPulse Clipper</h1>
-      <select
-        value={selectedUrl}
-        onChange={(e) => setSelectedUrl(e.target.value)}
-        disabled={loading}
-      >
-        <option value={tabUrl}>当前页面</option>
-        {links.map((link) => (
-          <option key={link.url} value={link.url}>
-            {link.platform}: {link.url}
-          </option>
-        ))}
-      </select>
+      <label className="field">
+        <span className="field-label">选择要提交的链接</span>
+        <select
+          value={selectedUrl}
+          onChange={(e) => setSelectedUrl(e.target.value)}
+          disabled={loading}
+        >
+          {tabUrl ? (
+            <option value={tabUrl}>当前页面</option>
+          ) : (
+            <option value="" disabled>
+              加载中...
+            </option>
+          )}
+          {links.map((link) => (
+            <option key={`${link.platform}:${link.url}`} value={link.url}>
+              {link.platform}: {link.url}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="actions">
         <button onClick={() => handleSubmit('archive')} disabled={loading || !selectedUrl}>
           归档到 AIPulse
@@ -72,7 +89,11 @@ function Popup() {
           归档并分析知识缺口
         </button>
       </div>
-      {status && <p className="status">{status}</p>}
+      {status && (
+        <p className="status" role="status" aria-live="polite">
+          {status}
+        </p>
+      )}
     </div>
   );
 }
