@@ -3,6 +3,24 @@
   "name": "AIPulse Clipper",
   "version": "0.1.0",
   "description": "一键提取网页视频/文章链接到 AIPulse 知识库",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.bilibili.com/*",
+    "https://b23.tv/*",
+    "https://www.douyin.com/*",
+    "https://www.xiaohongshu.com/*",
+    "https://xhslink.com/*",
+    "https://mp.weixin.qq.com/*",
+    "https://www.youtube.com/*",
+    "https://youtu.be/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

@@ -1,0 +1,9 @@
+{
+  "name": "com.aipulse.native_host",
+  "description": "AIPulse Native Messaging Host",
+  "path": "AIPULSE_TAURI_BINARY_PATH",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://AIPULSE_EXTENSION_ID/"
+  ]
+}
