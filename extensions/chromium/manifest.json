@@ -19,5 +19,21 @@
   "background": {
     "service_worker": "src/background.ts",
     "type": "module"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bilibili.com/*",
+        "https://b23.tv/*",
+        "https://www.douyin.com/*",
+        "https://www.xiaohongshu.com/*",
+        "https://xhslink.com/*",
+        "https://mp.weixin.qq.com/*",
+        "https://www.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "js": ["src/content.ts"],
+      "run_at": "document_idle"
+    }
+  ]
 }
