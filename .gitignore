@@ -181,3 +181,7 @@ out/
 storage/
 test-results/
 playwright-report/
+
+# Extension build output and dependencies
+extensions/chromium/dist/
+extensions/chromium/node_modules/
