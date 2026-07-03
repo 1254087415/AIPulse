@@ -15,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from pydantic import ValidationError
+
 from aipulse.core.article_pipeline import ArticlePipeline
 from aipulse.core.config import AppSettings, get_settings, reset_settings
 from aipulse.core.content_router import ContentType
@@ -23,7 +25,6 @@ from aipulse.core.rpc import JsonRpcRequest, JsonRpcResponse
 from aipulse.core.video_pipeline import VideoPipeline
 from aipulse.store.database import close_db, get_session_maker, init_db
 from aipulse.store.repository import TaskRepository
-from pydantic import ValidationError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,13 +86,16 @@ class Sidecar:
         self, request: JsonRpcRequest | dict[str, Any]
     ) -> JsonRpcResponse | None:
         """Dispatch incoming JSON-RPC requests."""
-        if isinstance(request, dict):
+        raw_request = request
+        if isinstance(raw_request, dict):
             try:
-                request = JsonRpcRequest.model_validate(request)
+                validated = JsonRpcRequest.model_validate(raw_request)
             except ValidationError:
                 return JsonRpcResponse.failure(
-                    request.get("id"), -32600, "invalid request"
+                    raw_request.get("id"), -32600, "invalid request"
                 )
+        else:
+            validated = raw_request
         handlers = {
             "submit_url": self._submit_url,
             "get_task_status": self._get_task_status,
@@ -99,17 +103,19 @@ class Sidecar:
             "get_settings": self._get_settings,
             "update_settings": self._update_settings,
         }
-        handler = handlers.get(request.method)
+        handler = handlers.get(validated.method)
         if handler is None:
             return JsonRpcResponse.failure(
-                request.id, -32601, f"method not found: {request.method}"
+                validated.id, -32601, f"method not found: {validated.method}"
             )
         try:
-            result = await handler(request.params)
-            return JsonRpcResponse.success(request.id, result)
+            result = await handler(validated.params)
+            return JsonRpcResponse.success(validated.id, result)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Handler %s failed", request.method)
-            return JsonRpcResponse.failure(request.id, -32603, f"internal error: {exc}")
+            logger.exception("Handler %s failed", validated.method)
+            return JsonRpcResponse.failure(
+                validated.id, -32603, f"internal error: {exc}"
+            )
 
     async def _submit_url(self, params: dict[str, Any]) -> dict[str, Any]:
         url = params.get("url")
@@ -173,9 +179,12 @@ class Sidecar:
             await session.commit()
             url = task.url
         cached = self._tasks.get(task.id, {})
-        cached["status"] = "pending"
-        cached["progress_pct"] = 0
-        cached["message"] = "任务已重新提交"
+        self._tasks[task.id] = {
+            **cached,
+            "status": "pending",
+            "progress_pct": 0,
+            "message": "任务已重新提交",
+        }
         self._spawn_pipeline(task.id, url)
         return {"task_id": task.id, "status": "pending"}
 
@@ -296,6 +305,7 @@ class Sidecar:
     ) -> None:
         """Emit a task_progress notification."""
         self._tasks[task_id] = {
+            **self._tasks.get(task_id, {}),
             "task_id": task_id,
             "status": status,
             "progress_pct": progress_pct,
