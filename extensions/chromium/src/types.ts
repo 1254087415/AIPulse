@@ -1,5 +1,9 @@
 export type SubmitMode = 'archive' | 'knowledge_check';
 
+declare global {
+  const __E2E__: boolean;
+}
+
 export interface FoundLink {
   url: string;
   platform: string;

@@ -3,19 +3,35 @@ import { submitViaNativeMessaging } from './native';
 import type { FoundLink, SubmitMode, SubmitPayload, SubmitResult } from './types';
 import { cleanTrackingParams, dedupeLinks } from './utils';
 
+const ALLOWED_MODES: SubmitMode[] = ['archive', 'knowledge_check'];
+
 interface BackgroundMessage {
   type: 'FOUND_LINKS' | 'SUBMIT_URL' | 'GET_FOUND_LINKS';
   links?: FoundLink[];
-  url?: string;
-  mode?: SubmitMode;
+  url?: unknown;
+  mode?: unknown;
 }
 
-let foundLinksCache: FoundLink[] = [];
+function isValidUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidMode(value: unknown): value is SubmitMode {
+  return typeof value === 'string' && (ALLOWED_MODES as string[]).includes(value);
+}
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
 }
+
+let foundLinksCache: FoundLink[] = [];
 
 export function handleMessage(
   message: BackgroundMessage,
@@ -24,6 +40,11 @@ export function handleMessage(
 ): boolean {
   if (message.type === 'FOUND_LINKS' && message.links) {
     foundLinksCache = dedupeLinks(message.links);
+    if (typeof chrome !== 'undefined' && chrome.action) {
+      const count = foundLinksCache.length;
+      chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
+      chrome.action.setBadgeBackgroundColor({ color: '#1677ff' });
+    }
     sendResponse({ ok: true, count: foundLinksCache.length });
     return false;
   }
@@ -33,13 +54,14 @@ export function handleMessage(
     return false;
   }
 
-  if (message.type === 'SUBMIT_URL' && message.url) {
-    submitUrl(message.url, message.mode || 'archive')
+  if (message.type === 'SUBMIT_URL' && isValidUrl(message.url) && isValidMode(message.mode)) {
+    submitUrl(message.url, message.mode)
       .then((result) => sendResponse({ ok: true, result }))
       .catch((err: unknown) => sendResponse({ ok: false, error: errorMessage(err) }));
     return true;
   }
 
+  sendResponse({ ok: false, error: 'invalid message' });
   return false;
 }
 
@@ -60,9 +82,10 @@ export function setupContextMenus(): void {
 
 export function handleContextMenuClick(info: chrome.contextMenus.OnClickData): void {
   const url = info.linkUrl || info.pageUrl;
-  if (url) {
-    submitUrl(url, 'archive').catch(() => {
-      // Silently ignore context-menu submission errors in MVP.
+  if (isValidUrl(url)) {
+    submitUrl(url, 'archive').catch((err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('AIPulse: context-menu submit failed', err);
     });
   }
 }

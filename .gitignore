@@ -185,3 +185,4 @@ playwright-report/
 # Extension build output and dependencies
 extensions/chromium/dist/
 extensions/chromium/node_modules/
+extensions/chromium/tests/.tmp/

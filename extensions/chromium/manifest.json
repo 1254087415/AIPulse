@@ -19,7 +19,8 @@
     "https://xhslink.com/*",
     "https://mp.weixin.qq.com/*",
     "https://www.youtube.com/*",
-    "https://youtu.be/*"
+    "https://youtu.be/*",
+    "http://localhost:3456/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -48,7 +49,8 @@
         "https://xhslink.com/*",
         "https://mp.weixin.qq.com/*",
         "https://www.youtube.com/*",
-        "https://youtu.be/*"
+        "https://youtu.be/*",
+        "http://localhost:3456/*"
       ],
       "js": ["src/content.ts"],
       "run_at": "document_idle"

@@ -1,5 +1,6 @@
 import { extractAllLinks } from './platform/registry';
-import { dedupeLinks } from './utils';
+import type { SubmitMode } from './types';
+import { cleanTrackingParams, dedupeLinks } from './utils';
 
 function scanAndReport() {
   try {
@@ -11,12 +12,32 @@ function scanAndReport() {
         return;
       }
     });
-  } catch {
-    // Silently ignore extraction failures in production.
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('AIPulse: link extraction failed', error);
   }
 }
 
 scanAndReport();
+
+// Test bridge: pages can dispatch AIPULSE_SUBMIT_URL to trigger a submission.
+// This block is compiled out of production builds (vite define __E2E__ = false).
+if (__E2E__) {
+  window.addEventListener('AIPULSE_SUBMIT_URL', (event) => {
+    const detail = (event as CustomEvent).detail as { url: string; mode?: SubmitMode } | undefined;
+    if (!detail?.url) return;
+    chrome.runtime.sendMessage(
+      {
+        type: 'SUBMIT_URL',
+        url: cleanTrackingParams(detail.url),
+        mode: detail.mode || 'archive',
+      },
+      () => {
+        // Ignore response; the E2E test verifies the HTTP request on the server.
+      }
+    );
+  });
+}
 
 let lastUrl = window.location.href;
 let debounceTimer: number | null = null;
