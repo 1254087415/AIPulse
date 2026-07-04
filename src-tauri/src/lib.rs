@@ -11,6 +11,7 @@ use tokio::process::Command;
 pub mod app_state;
 pub mod commands;
 pub mod menu;
+pub mod native_messaging;
 pub mod python_runner;
 
 pub use app_state::{AppState, SidecarResponse};
@@ -28,6 +29,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let handle = app.handle().clone();
 
             tauri::async_runtime::block_on(async {
@@ -51,12 +55,23 @@ pub fn run() {
             open_settings_window,
             open_tasks_window,
             show_input_window,
+            hide_window,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if is_popup_label(window.label()) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if let Err(e) = window.hide() {
+                        log::error!("failed to hide popup window: {e}");
+                    }
+                }
+            }
+
+            if let WindowEvent::Focused(false) = event {
+                if is_popup_label(window.label()) {
+                    if let Err(e) = window.hide() {
+                        log::error!("failed to hide popup window: {e}");
+                    }
                 }
             }
         })
