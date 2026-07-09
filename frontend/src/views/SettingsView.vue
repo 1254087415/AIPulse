@@ -37,13 +37,22 @@ async function save() {
   saving.value = true
   message.value = ''
   try {
-    const updated = await invoke<Partial<Settings>>('update_settings', { settings })
+    const payload: Partial<Settings> = {}
+    for (const [key, value] of Object.entries(settings)) {
+      if (typeof value === 'string' && value.includes('***')) {
+        continue
+      }
+      ;(payload as Record<string, unknown>)[key] = value
+    }
+    const updated = await invoke<Partial<Settings>>('update_settings', { settings: payload })
     if (updated && typeof updated === 'object') {
       Object.assign(settings, updated)
     }
     message.value = '已保存'
   } catch (e) {
-    message.value = `保存失败: ${e}`
+    message.value = `保存失败: ${JSON.stringify(e)}`
+    // eslint-disable-next-line no-console
+    console.error('update_settings failed', e)
   } finally {
     saving.value = false
   }
@@ -54,7 +63,9 @@ onMounted(async () => {
     const data = await invoke<Partial<Settings>>('get_settings')
     Object.assign(settings, data)
   } catch (e) {
-    message.value = `加载失败: ${e}`
+    message.value = `加载失败: ${JSON.stringify(e)}`
+    // eslint-disable-next-line no-console
+    console.error('get_settings failed', e)
   }
 })
 </script>
@@ -63,57 +74,79 @@ onMounted(async () => {
   <div class="settings-container">
     <h2>设置</h2>
 
-    <section>
-      <h3>Kimi Code LLM</h3>
-      <label for="llm-api-key">API Key</label>
-      <input id="llm-api-key" v-model="settings.llm_api_key" type="password" />
-      <label for="llm-base-url">Base URL</label>
-      <input id="llm-base-url" v-model="settings.llm_base_url" type="text" />
-      <label for="llm-model">Model</label>
-      <input id="llm-model" v-model="settings.llm_model" type="text" />
-    </section>
+    <div class="scrollable-content">
+      <section>
+        <h3>Kimi Code LLM</h3>
+        <label for="llm-api-key">API Key</label>
+        <input id="llm-api-key" v-model="settings.llm_api_key" type="password" />
+        <label for="llm-base-url">Base URL</label>
+        <input id="llm-base-url" v-model="settings.llm_base_url" type="text" />
+        <label for="llm-model">Model</label>
+        <input id="llm-model" v-model="settings.llm_model" type="text" />
+      </section>
 
-    <section>
-      <h3>Obsidian</h3>
-      <label for="obsidian-vault-path">Vault 路径</label>
-      <input id="obsidian-vault-path" v-model="settings.obsidian_vault_path" type="text" />
-      <label for="obsidian-archive-folder">归档文件夹</label>
-      <input id="obsidian-archive-folder" v-model="settings.obsidian_archive_folder" type="text" />
-    </section>
+      <section>
+        <h3>Obsidian</h3>
+        <label for="obsidian-vault-path">Vault 路径</label>
+        <input id="obsidian-vault-path" v-model="settings.obsidian_vault_path" type="text" />
+        <label for="obsidian-archive-folder">归档文件夹</label>
+        <input id="obsidian-archive-folder" v-model="settings.obsidian_archive_folder" type="text" />
+      </section>
 
-    <section>
-      <h3>飞书推送</h3>
-      <label for="feishu-webhook-url">Webhook URL</label>
-      <input id="feishu-webhook-url" v-model="settings.feishu_webhook_url" type="text" />
-      <label for="feishu-secret">Secret</label>
-      <input id="feishu-secret" v-model="settings.feishu_secret" type="password" />
-    </section>
+      <section>
+        <h3>飞书推送</h3>
+        <label for="feishu-webhook-url">Webhook URL</label>
+        <input id="feishu-webhook-url" v-model="settings.feishu_webhook_url" type="text" />
+        <label for="feishu-secret">Secret</label>
+        <input id="feishu-secret" v-model="settings.feishu_secret" type="password" />
+      </section>
 
-    <section>
-      <h3>微信推送</h3>
-      <label for="wechat-appid">AppID</label>
-      <input id="wechat-appid" v-model="settings.wechat_appid" type="text" />
-      <label for="wechat-appsecret">AppSecret</label>
-      <input id="wechat-appsecret" v-model="settings.wechat_appsecret" type="password" />
-      <label for="wechat-template-id">Template ID</label>
-      <input id="wechat-template-id" v-model="settings.wechat_template_id" type="text" />
-      <label for="wechat-openid">OpenID</label>
-      <input id="wechat-openid" v-model="settings.wechat_openid" type="text" />
-    </section>
+      <section>
+        <h3>微信推送</h3>
+        <label for="wechat-appid">AppID</label>
+        <input id="wechat-appid" v-model="settings.wechat_appid" type="text" />
+        <label for="wechat-appsecret">AppSecret</label>
+        <input id="wechat-appsecret" v-model="settings.wechat_appsecret" type="password" />
+        <label for="wechat-template-id">Template ID</label>
+        <input id="wechat-template-id" v-model="settings.wechat_template_id" type="text" />
+        <label for="wechat-openid">OpenID</label>
+        <input id="wechat-openid" v-model="settings.wechat_openid" type="text" />
+      </section>
+    </div>
 
-    <button :disabled="saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
-    <p v-if="message" class="message">{{ message }}</p>
+    <div class="actions">
+      <button :disabled="saving" @click="save">{{ saving ? '保存中...' : '保存' }}</button>
+      <p v-if="message" class="message">{{ message }}</p>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .settings-container {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.scrollable-content {
   padding: 20px;
+  flex: 1;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: 100vh;
-  overflow-y: auto;
+}
+
+.actions {
+  padding: 12px 20px 20px;
+  border-top: 1px solid #eee;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 section {

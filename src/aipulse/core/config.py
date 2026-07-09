@@ -147,7 +147,10 @@ class AppSettings(BaseSettings):
             new_value = changes.get(key)
             if new_value and not self._is_masked_secret(new_value):
                 current[key] = new_value
-            elif key not in changes:
+            else:
+                # Preserve the existing secret when the incoming value is empty,
+                # masked, or omitted. This prevents the UI from clearing secrets
+                # when it sends back a masked placeholder.
                 current[key] = self._get_secret_value(key)
         for key, value in changes.items():
             if key not in _SECRET_KEYS:
