@@ -44,9 +44,9 @@ class RssParser:
 
     def _parse_published_at(self, entry: Any) -> datetime | None:
         """Extract the publication datetime from a feedparser entry."""
-        parsed_time: struct_time | None = getattr(
-            entry, "published_parsed", None
-        ) or getattr(entry, "updated_parsed", None)
+        parsed_time: struct_time | None = getattr(entry, "published_parsed", None) or getattr(
+            entry, "updated_parsed", None
+        )
         if parsed_time is None:
             return None
         try:

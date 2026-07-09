@@ -1,0 +1,16 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+web/dist
+.claude
+.git
+frontend
+src-tauri
+tests
+migrations/__pycache__
+data
+**/.env*
+.envrc
+!.env.example

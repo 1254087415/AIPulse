@@ -22,7 +22,9 @@ def wechat_settings() -> AppSettings:
 
 @pytest.fixture
 def wechat_strategy(wechat_settings: AppSettings) -> WechatPushStrategy:
-    return WechatPushStrategy(wechat_settings, client=httpx.AsyncClient(transport=httpx.MockTransport(None)))
+    return WechatPushStrategy(
+        wechat_settings, client=httpx.AsyncClient(transport=httpx.MockTransport(None))
+    )
 
 
 @pytest.mark.unit

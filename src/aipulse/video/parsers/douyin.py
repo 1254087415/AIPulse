@@ -59,13 +59,15 @@ class DouyinApiClient:
         """Download a Douyin video to filepath, creating parent directories."""
         filepath.parent.mkdir(parents=True, exist_ok=True)
         temp_path = filepath.with_suffix(filepath.suffix + ".part")
-        async with await self._get_client() as client:
-            async with client.stream("GET", media_url, follow_redirects=True) as resp:
-                resp.raise_for_status()
-                with temp_path.open("wb") as fh:
-                    async for chunk in resp.aiter_bytes():
-                        if chunk:
-                            fh.write(chunk)
+        async with (
+            await self._get_client() as client,
+            client.stream("GET", media_url, follow_redirects=True) as resp,
+        ):
+            resp.raise_for_status()
+            with temp_path.open("wb") as fh:
+                async for chunk in resp.aiter_bytes():
+                    if chunk:
+                        fh.write(chunk)
         temp_path.rename(filepath)
 
     @staticmethod
@@ -75,9 +77,7 @@ class DouyinApiClient:
             raise ValueError("未找到有效的抖音链接")
         return match.group(0).strip().strip("\"'").rstrip(").,;!?'")
 
-    async def _resolve_redirect(
-        self, client: httpx.AsyncClient, share_url: str
-    ) -> str:
+    async def _resolve_redirect(self, client: httpx.AsyncClient, share_url: str) -> str:
         resp = await client.get(share_url, follow_redirects=True)
         resp.raise_for_status()
         return str(resp.url)
@@ -117,7 +117,7 @@ class DouyinApiClient:
                 if attempt == 2:
                     logger.warning("Douyin API failed for %s, trying share page", video_id)
                 else:
-                    await __import__("asyncio").sleep(1 * (2 ** attempt))
+                    await __import__("asyncio").sleep(1 * (2**attempt))
 
         resp = await client.get(resolved_url)
         resp.raise_for_status()
@@ -182,9 +182,7 @@ class DouyinParser(ContentParser):
         item_info = await client.parse_share_link(url)
         return self._build_parsed_content(item_info, url)
 
-    async def download(
-        self, url: str, download_dir: Path, task_id: str
-    ) -> dict[str, Path]:
+    async def download(self, url: str, download_dir: Path, task_id: str) -> dict[str, Path]:
         """Download a Douyin video to the task work directory.
 
         Returns a dict compatible with VideoDownloader.download().

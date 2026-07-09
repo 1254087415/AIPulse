@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ _SECRET_KEYS = {
     "llm_api_key",
     "feishu_secret",
     "wechat_appsecret",
+    "wechat_bot_token",
 }
 
 
@@ -28,7 +30,8 @@ class AppSettings(BaseSettings):
     )
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///data/aipulse.db"
+    database_url: str = "sqlite+aiosqlite:///./data/aipulse.db"
+    auto_create_tables: bool = False
 
     # LLM
     llm_provider: str = "openai"
@@ -52,6 +55,11 @@ class AppSettings(BaseSettings):
     wechat_appsecret: SecretStr = Field(default=SecretStr(""))
     wechat_template_id: str = ""
     wechat_openid: str = ""
+    wechat_bot_token: SecretStr = Field(default=SecretStr(""))
+    wechat_to_user: str = Field(default="")
+    wechat_account_id: str = Field(default="")
+    wechat_context_token_file: str = Field(default="")
+    wechat_send_script: str = Field(default="")
 
     # Data dirs
     data_dir: Path = Path("./data")
@@ -78,11 +86,43 @@ class AppSettings(BaseSettings):
         """Ensure data directories exist after initialization."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def scripts_dir(self) -> Path:
+        """Directory where external push scripts must reside."""
+        return self.data_dir / "scripts"
 
     @property
     def settings_path(self) -> Path:
         """Path to the persisted settings JSON file."""
         return self.data_dir / "settings.json"
+
+    @staticmethod
+    def validate_script_path(path: str | Path, data_dir: Path) -> Path:
+        """Validate that an external script path is safe to execute.
+
+        Raises:
+            ValueError: If the path is empty, contains traversal or shell
+                metacharacters, is not a regular file, or is outside the
+                configured ``data_dir/scripts`` directory.
+        """
+        if not path:
+            raise ValueError("script path is empty")
+        raw = str(path).strip()
+        if not raw:
+            raise ValueError("script path is empty")
+        if ".." in raw or re.search(r"[;|&$\\`\n\r]", raw):
+            raise ValueError(f"script path contains unsafe characters: {raw}")
+        resolved = Path(raw).expanduser().resolve()
+        scripts_dir = (data_dir / "scripts").resolve()
+        if not resolved.is_relative_to(scripts_dir):
+            raise ValueError(
+                f"script must be located under {scripts_dir}: {resolved}"
+            )
+        if not resolved.is_file():
+            raise ValueError(f"script is not a regular file: {resolved}")
+        return resolved
 
     def save(self) -> None:
         """Persist runtime overrides to a JSON file under data/settings.json."""
@@ -92,16 +132,17 @@ class AppSettings(BaseSettings):
             "llm_provider",
             "llm_base_url",
             "llm_model",
-            "llm_api_key",
             "whisper_model",
             "obsidian_vault_path",
             "obsidian_archive_folder",
             "feishu_webhook_url",
-            "feishu_secret",
             "wechat_appid",
-            "wechat_appsecret",
             "wechat_template_id",
             "wechat_openid",
+            "wechat_to_user",
+            "wechat_account_id",
+            "wechat_context_token_file",
+            "wechat_send_script",
             "data_dir",
             "download_dir",
             "log_level",
@@ -155,6 +196,10 @@ class AppSettings(BaseSettings):
         for key, value in changes.items():
             if key not in _SECRET_KEYS:
                 current[key] = value
+        # Validate security-sensitive paths before constructing the new instance.
+        new_script = current.get("wechat_send_script")
+        if new_script:
+            self.validate_script_path(new_script, Path(current.get("data_dir", self.data_dir)))
         # Ensure Path fields are converted back to Path objects.
         path_keys = {"data_dir", "download_dir", "obsidian_vault_path"}
         for key in path_keys:

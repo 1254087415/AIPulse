@@ -11,7 +11,9 @@ from aipulse.summarizers.base import SummaryResult
 class FakeContent:
     """Minimal content object for archiver tests."""
 
-    def __init__(self, platform: str, url: str, title: str | None = None, author: str | None = None):
+    def __init__(
+        self, platform: str, url: str, title: str | None = None, author: str | None = None
+    ):
         self.platform = platform
         self.url = url
         self.title = title
@@ -39,7 +41,9 @@ def summary() -> SummaryResult:
 
 
 @pytest.mark.unit
-async def test_obsidian_archiver_writes_notes(settings: AppSettings, summary: SummaryResult) -> None:
+async def test_obsidian_archiver_writes_notes(
+    settings: AppSettings, summary: SummaryResult
+) -> None:
     settings.obsidian_vault_path.mkdir(parents=True, exist_ok=True)
     archiver = ObsidianArchiver(settings)
     content = FakeContent(platform="youtube", url="https://example.com", author="Author")
@@ -68,7 +72,9 @@ async def test_obsidian_archiver_is_configured(settings: AppSettings) -> None:
 
 
 @pytest.mark.unit
-async def test_obsidian_archiver_raises_when_vault_missing(settings: AppSettings, summary: SummaryResult) -> None:
+async def test_obsidian_archiver_raises_when_vault_missing(
+    settings: AppSettings, summary: SummaryResult
+) -> None:
     archiver = ObsidianArchiver(settings)
     content = FakeContent(platform="youtube", url="https://example.com")
 

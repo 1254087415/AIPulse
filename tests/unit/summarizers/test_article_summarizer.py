@@ -36,7 +36,9 @@ async def test_article_summarizer_builds_prompt(adapter: OpenAICompatibleAdapter
 
 
 @pytest.mark.unit
-async def test_article_summarizer_falls_back_to_raw_response(adapter: OpenAICompatibleAdapter) -> None:
+async def test_article_summarizer_falls_back_to_raw_response(
+    adapter: OpenAICompatibleAdapter,
+) -> None:
     summarizer = ArticleSummarizer(adapter)
     adapter.complete.return_value = "raw summary"
 

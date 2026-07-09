@@ -27,21 +27,27 @@ def adapter(settings: AppSettings) -> OpenAICompatibleAdapter:
 
 
 @pytest.mark.unit
-def test_factory_returns_video_summarizer_for_video_types(settings: AppSettings, adapter: OpenAICompatibleAdapter) -> None:
+def test_factory_returns_video_summarizer_for_video_types(
+    settings: AppSettings, adapter: OpenAICompatibleAdapter
+) -> None:
     for content_type in ("youtube", "bilibili", "douyin", "xiaohongshu", "generic_video", "video"):
         summarizer = SummarizerFactory.get_summarizer(settings, content_type, adapter=adapter)
         assert isinstance(summarizer, VideoSummarizer)
 
 
 @pytest.mark.unit
-def test_factory_returns_article_summarizer_for_unknown_types(settings: AppSettings, adapter: OpenAICompatibleAdapter) -> None:
+def test_factory_returns_article_summarizer_for_unknown_types(
+    settings: AppSettings, adapter: OpenAICompatibleAdapter
+) -> None:
     for content_type in ("wechat_article", "rss_feed", "generic_article", "", "unknown"):
         summarizer = SummarizerFactory.get_summarizer(settings, content_type, adapter=adapter)
         assert isinstance(summarizer, ArticleSummarizer)
 
 
 @pytest.mark.unit
-def test_factory_is_case_insensitive(settings: AppSettings, adapter: OpenAICompatibleAdapter) -> None:
+def test_factory_is_case_insensitive(
+    settings: AppSettings, adapter: OpenAICompatibleAdapter
+) -> None:
     summarizer = SummarizerFactory.get_summarizer(settings, "YouTube", adapter=adapter)
     assert isinstance(summarizer, VideoSummarizer)
     summarizer = SummarizerFactory.get_summarizer(settings, "RSS", adapter=adapter)

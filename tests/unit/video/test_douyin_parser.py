@@ -4,7 +4,6 @@ Exercises DouyinApiClient.parse_share_link and DouyinParser.parse/download
 using mocked httpx responses.
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,7 +22,9 @@ SHARE_HTML = """
 """
 
 
-def _mock_httpx_client(response_text: str, resolved_url: str = "https://www.douyin.com/video/7649722907526521195/") -> MagicMock:
+def _mock_httpx_client(
+    response_text: str, resolved_url: str = "https://www.douyin.com/video/7649722907526521195/"
+) -> MagicMock:
     """Return a mock httpx.AsyncClient that yields the given response text."""
     response = MagicMock()
     response.text = response_text

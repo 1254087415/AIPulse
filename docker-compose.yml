@@ -1,0 +1,26 @@
+services:
+  mysql:
+    image: mysql:8
+    env_file: .env
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "aipulse", "-p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  aipulse:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["sh", "-c", "uv run alembic -c migrations/alembic.ini upgrade head && uv run uvicorn aipulse.server:app --host 0.0.0.0 --port 8000"]
+
+volumes:
+  mysql_data:

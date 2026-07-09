@@ -22,7 +22,8 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite>=0.20",
+    "aiomysql>=0.2",
+    "pymysql>=1.1",
     "alembic>=1.13",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
@@ -35,6 +36,8 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "readability-lxml>=0.8",
     "socksio>=1.0.0",
+    "fastapi>=0.110",
+    "aiosqlite>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +47,7 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "respx>=0.22",
 ]
 
 [project.scripts]
@@ -89,6 +93,7 @@ addopts = "--cov=aipulse --cov-report=term-missing --cov-report=html"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
+    "e2e: End-to-end tests",
 ]
 
 [tool.coverage.run]
@@ -111,3 +116,7 @@ disallow_untyped_defs = true
 exclude = [
     "migrations",
 ]
+
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true

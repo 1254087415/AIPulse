@@ -41,9 +41,7 @@ async def test_submit_url_creates_task(sidecar: Sidecar) -> None:
 
 @pytest.mark.unit
 async def test_submit_url_requires_url(sidecar: Sidecar) -> None:
-    result = await sidecar.handle_request(
-        JsonRpcRequest(method="submit_url", params={})
-    )
+    result = await sidecar.handle_request(JsonRpcRequest(method="submit_url", params={}))
     assert isinstance(result, JsonRpcResponse)
     assert result.error is not None
     assert result.error.code == -32603
@@ -78,9 +76,7 @@ async def test_retry_task_resets_status(sidecar: Sidecar) -> None:
 
 @pytest.mark.unit
 async def test_get_settings_masks_secrets(sidecar: Sidecar) -> None:
-    result = await sidecar.handle_request(
-        JsonRpcRequest(method="get_settings", params={})
-    )
+    result = await sidecar.handle_request(JsonRpcRequest(method="get_settings", params={}))
     assert result.error is None
     assert result.result["llm_base_url"] == "https://api.kimi.com/coding/v1"
     assert result.result["llm_model"] == "kimi-for-coding"
@@ -105,9 +101,7 @@ async def test_update_settings_persists_changes(sidecar: Sidecar, tmp_path: Path
 
 @pytest.mark.unit
 async def test_unknown_method_returns_error(sidecar: Sidecar) -> None:
-    result = await sidecar.handle_request(
-        JsonRpcRequest(method="unknown_method", params={})
-    )
+    result = await sidecar.handle_request(JsonRpcRequest(method="unknown_method", params={}))
     assert result.error is not None
     assert result.error.code == -32601
 
@@ -154,11 +148,13 @@ async def test_main_parses_line_and_responds(monkeypatch, tmp_path: Path) -> Non
     monkeypatch.setattr(sys, "stdin", stdin)
     monkeypatch.setattr(sys, "stdout", stdout)
 
-    with patch("aipulse.desktop.sidecar.init_db", new_callable=AsyncMock), patch(
-        "aipulse.desktop.sidecar.close_db", new_callable=AsyncMock
-    ), patch("aipulse.desktop.sidecar.get_settings", return_value=settings), patch(
-        "aipulse.desktop.sidecar._read_stdin_lines"
-    ) as mock_read_lines:
+    with (
+        patch("aipulse.desktop.sidecar.init_db", new_callable=AsyncMock),
+        patch("aipulse.desktop.sidecar.close_db", new_callable=AsyncMock),
+        patch("aipulse.desktop.sidecar.get_settings", return_value=settings),
+        patch("aipulse.desktop.sidecar._read_stdin_lines") as mock_read_lines,
+    ):
+
         async def _lines():
             for line in input_lines:
                 yield line.encode("utf-8")
