@@ -53,7 +53,7 @@ describe('InputView', () => {
     const wrapper = mount(InputView)
     const button = wrapper.find('.submit-button')
 
-    expect(button.element.disabled).toBe(true)
+    expect((button.element as HTMLButtonElement).disabled).toBe(true)
     wrapper.unmount()
   })
 
@@ -64,7 +64,7 @@ describe('InputView', () => {
     await input.setValue('https://example.com/article')
     const button = wrapper.find('.submit-button')
 
-    expect(button.element.disabled).toBe(false)
+    expect((button.element as HTMLButtonElement).disabled).toBe(false)
     wrapper.unmount()
   })
 
@@ -106,7 +106,7 @@ describe('InputView', () => {
     await wrapper.find('.submit-button').trigger('click')
     await flushPromises()
 
-    expect(input.element.value).toBe('')
+    expect((input.element as HTMLInputElement).value).toBe('')
     wrapper.unmount()
   })
 
@@ -124,7 +124,7 @@ describe('InputView', () => {
     await button.trigger('click')
     await flushPromises()
 
-    expect(button.element.disabled).toBe(true)
+    expect((button.element as HTMLButtonElement).disabled).toBe(true)
     expect(button.text()).toBe('提交中...')
 
     resolveSubmit(undefined)
