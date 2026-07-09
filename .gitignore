@@ -189,3 +189,7 @@ extensions/chromium/tests/.tmp/
 
 # Generated Tauri sidecar resources (synced from src/aipulse by build script)
 src-tauri/resources/
+
+# Claude Code skill artifacts
+.agents/
+skills-lock.json

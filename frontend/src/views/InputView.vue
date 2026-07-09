@@ -303,17 +303,17 @@ onUnmounted(() => {
 }
 
 .input-field:focus {
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cyan) 20%, transparent);
+  border-color: var(--accent-coral);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-coral) 20%, transparent);
 }
 
 .submit-button {
   width: 100%;
   height: 48px;
   background: var(--surface-elevated);
-  border: 1px solid var(--accent-cyan);
+  border: 1px solid var(--accent-coral);
   border-radius: var(--radius-md);
-  color: var(--accent-cyan);
+  color: var(--accent-coral);
   font-size: var(--text-base);
   font-weight: 500;
   cursor: pointer;
@@ -321,7 +321,7 @@ onUnmounted(() => {
 }
 
 .submit-button:hover:not(:disabled) {
-  background: var(--accent-cyan);
+  background: var(--status-green);
   color: var(--surface-bg);
 }
 
@@ -346,7 +346,7 @@ onUnmounted(() => {
 
 .progress-bar {
   height: 100%;
-  background: var(--accent-cyan);
+  background: var(--status-green);
   transition: width 0.2s ease;
 }
 
@@ -393,7 +393,7 @@ onUnmounted(() => {
 }
 
 .status-dot.completed {
-  background: var(--accent-cyan);
+  background: var(--status-green);
 }
 
 .status-dot.failed {

@@ -95,7 +95,7 @@ const activePath = computed(() => route.path)
 }
 
 .tab.active {
-  color: var(--accent-cyan);
+  color: var(--accent-coral);
 }
 
 .tab.active::after {
@@ -105,8 +105,8 @@ const activePath = computed(() => route.path)
   left: 12px;
   right: 12px;
   height: 2px;
-  background-color: var(--accent-cyan);
+  background-color: var(--accent-coral);
   border-radius: 1px;
-  box-shadow: 0 0 8px var(--accent-cyan-glow);
+  box-shadow: 0 0 8px var(--accent-coral-glow);
 }
 </style>

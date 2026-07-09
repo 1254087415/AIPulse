@@ -389,7 +389,7 @@ input {
 
 input:focus {
   outline: none;
-  border-color: var(--accent-cyan);
+  border-color: var(--accent-coral);
 }
 
 .password-field {
@@ -427,9 +427,9 @@ input:focus {
   width: 100%;
   height: 40px;
   background: var(--surface-elevated);
-  border: 1px solid var(--accent-cyan);
+  border: 1px solid var(--accent-coral);
   border-radius: var(--radius-sm);
-  color: var(--accent-cyan);
+  color: var(--accent-coral);
   font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
@@ -437,7 +437,7 @@ input:focus {
 }
 
 .save-button:hover:not(:disabled) {
-  background: var(--accent-cyan);
+  background: var(--accent-coral);
   color: var(--surface-bg);
 }
 

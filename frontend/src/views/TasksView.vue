@@ -295,16 +295,16 @@ onUnmounted(() => {
   margin-top: 8px;
   padding: 8px 16px;
   background: var(--surface-elevated);
-  border: 1px solid var(--accent-cyan);
+  border: 1px solid var(--accent-coral);
   border-radius: var(--radius-sm);
-  color: var(--accent-cyan);
+  color: var(--status-green);
   font-size: var(--text-sm);
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .goto-input-button:hover {
-  background: var(--accent-cyan);
+  background: var(--status-green);
   color: var(--surface-bg);
 }
 
@@ -386,7 +386,7 @@ onUnmounted(() => {
 }
 
 .status-dot.completed {
-  background: var(--accent-cyan);
+  background: var(--status-green);
 }
 
 .status-dot.failed {
@@ -405,7 +405,7 @@ onUnmounted(() => {
 }
 
 .task-card.completed .status-label {
-  color: var(--accent-cyan);
+  color: var(--status-green);
 }
 
 .task-card.failed .status-label {
