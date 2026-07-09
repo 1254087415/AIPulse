@@ -18,6 +18,7 @@ body,
 
 body {
   font-family: var(--font-body);
+  font-size: var(--text-base);
   color: var(--text-primary);
   background: var(--surface-bg);
 }
@@ -27,8 +28,7 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -37,7 +37,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-subtle);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
