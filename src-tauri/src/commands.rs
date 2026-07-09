@@ -148,8 +148,8 @@ pub fn open_settings_window(handle: AppHandle) -> Result<(), String> {
         &handle,
         "settings",
         WebviewUrl::App("index.html#/settings".into()),
+        560.0,
         640.0,
-        480.0,
     )
 }
 
@@ -159,8 +159,8 @@ pub fn open_tasks_window(handle: AppHandle) -> Result<(), String> {
         &handle,
         "tasks",
         WebviewUrl::App("index.html#/tasks".into()),
-        720.0,
-        480.0,
+        560.0,
+        640.0,
     )
 }
 
