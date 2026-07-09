@@ -81,7 +81,9 @@ def test_adapter_creates_real_client_with_default_key() -> None:
 
 
 @pytest.mark.unit
-async def test_complete_raises_on_empty_response(settings: AppSettings, mock_client: AsyncOpenAI) -> None:
+async def test_complete_raises_on_empty_response(
+    settings: AppSettings, mock_client: AsyncOpenAI
+) -> None:
     adapter = OpenAICompatibleAdapter(settings, client=mock_client)
     message = MagicMock()
     message.content = ""
@@ -96,7 +98,9 @@ async def test_complete_raises_on_empty_response(settings: AppSettings, mock_cli
 
 
 @pytest.mark.unit
-async def test_complete_raises_on_rate_limit(settings: AppSettings, mock_client: AsyncOpenAI) -> None:
+async def test_complete_raises_on_rate_limit(
+    settings: AppSettings, mock_client: AsyncOpenAI
+) -> None:
     adapter = OpenAICompatibleAdapter(settings, client=mock_client)
     mock_client.chat.completions.create = AsyncMock(
         side_effect=RateLimitError("rate limited", response=MagicMock(), body=None)
@@ -107,7 +111,9 @@ async def test_complete_raises_on_rate_limit(settings: AppSettings, mock_client:
 
 
 @pytest.mark.unit
-async def test_complete_raises_on_api_error(settings: AppSettings, mock_client: AsyncOpenAI) -> None:
+async def test_complete_raises_on_api_error(
+    settings: AppSettings, mock_client: AsyncOpenAI
+) -> None:
     adapter = OpenAICompatibleAdapter(settings, client=mock_client)
     mock_client.chat.completions.create = AsyncMock(
         side_effect=APIError("api error", request=MagicMock(), body=None)
@@ -118,7 +124,9 @@ async def test_complete_raises_on_api_error(settings: AppSettings, mock_client: 
 
 
 @pytest.mark.unit
-async def test_complete_raises_on_none_content(settings: AppSettings, mock_client: AsyncOpenAI) -> None:
+async def test_complete_raises_on_none_content(
+    settings: AppSettings, mock_client: AsyncOpenAI
+) -> None:
     adapter = OpenAICompatibleAdapter(settings, client=mock_client)
     message = MagicMock()
     message.content = None

@@ -63,3 +63,32 @@ def test_get_settings_cached() -> None:
     first = get_settings()
     second = get_settings()
     assert first is second
+
+
+@pytest.mark.unit
+def test_wechat_bot_fields_and_secret_handling(tmp_path: Path) -> None:
+    reset_settings()
+    scripts_dir = tmp_path / "data" / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    send_script = scripts_dir / "send.sh"
+    send_script.write_text("#!/usr/bin/env bash\necho ok\n")
+    settings = AppSettings(
+        data_dir=tmp_path / "data",
+        download_dir=tmp_path / "data" / "downloads",
+        database_url="mysql+aiomysql://user:pass@localhost:3306/aipulse",
+        wechat_bot_token="secret-token",
+        wechat_to_user="to-user",
+        wechat_account_id="account-id",
+        wechat_context_token_file="/tmp/token.json",
+        wechat_send_script=str(send_script),
+    )
+    assert settings.database_url.startswith("mysql+aiomysql")
+    assert settings.wechat_to_user == "to-user"
+    assert settings.wechat_account_id == "account-id"
+    assert settings.wechat_context_token_file == "/tmp/token.json"
+    assert settings.wechat_send_script == str(send_script)
+    public = settings.to_public_dict()
+    assert "***" in public["wechat_bot_token"]
+    assert "secret" not in public["wechat_bot_token"]
+    updated = settings.update(wechat_bot_token="***")
+    assert updated.wechat_bot_token.get_secret_value() == "secret-token"

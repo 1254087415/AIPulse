@@ -144,8 +144,7 @@ async def classify_url(url: str) -> ContentType:
     article = ArticleHandler()
 
     (
-        youtube
-        .set_next(bilibili)
+        youtube.set_next(bilibili)
         .set_next(douyin)
         .set_next(xiaohongshu)
         .set_next(wechat)

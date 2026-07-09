@@ -55,7 +55,7 @@ class RssFeed(Base):
     __tablename__ = "rss_feeds"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=make_uuid)
-    url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    url: Mapped[str] = mapped_column(String(768), nullable=False, unique=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     auto_process: Mapped[bool] = mapped_column(default=True)
     last_fetched_at: Mapped[datetime | None] = mapped_column(nullable=True)

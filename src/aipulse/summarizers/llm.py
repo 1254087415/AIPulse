@@ -30,9 +30,7 @@ class OpenAICompatibleAdapter:
             self.client = client
         else:
             api_key = (
-                self.settings.llm_api_key.get_secret_value()
-                if self.settings.llm_api_key
-                else None
+                self.settings.llm_api_key.get_secret_value() if self.settings.llm_api_key else None
             )
             self.client = AsyncOpenAI(
                 base_url=self.base_url,

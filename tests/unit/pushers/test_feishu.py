@@ -23,7 +23,9 @@ def feishu_settings() -> AppSettings:
 
 @pytest.fixture
 def feishu_strategy(feishu_settings: AppSettings) -> FeishuPushStrategy:
-    return FeishuPushStrategy(feishu_settings, client=httpx.AsyncClient(transport=httpx.MockTransport(None)))
+    return FeishuPushStrategy(
+        feishu_settings, client=httpx.AsyncClient(transport=httpx.MockTransport(None))
+    )
 
 
 @pytest.mark.unit

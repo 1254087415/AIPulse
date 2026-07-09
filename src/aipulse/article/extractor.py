@@ -47,7 +47,9 @@ class WechatExtractor(ArticleExtractor):
         )
 
     def _extract_title(self, soup: BeautifulSoup) -> str | None:
-        tag = soup.find("h1", class_="rich_media_title") or soup.find("h2", class_="rich_media_title")
+        tag = soup.find("h1", class_="rich_media_title") or soup.find(
+            "h2", class_="rich_media_title"
+        )
         return tag.get_text(strip=True) if tag else None
 
     def _extract_author(self, soup: BeautifulSoup) -> str | None:

@@ -20,9 +20,7 @@ class WechatPushStrategy(PushStrategy):
     def __init__(self, settings: AppSettings, client: httpx.AsyncClient | None = None):
         self.appid = settings.wechat_appid
         self.appsecret = (
-            settings.wechat_appsecret.get_secret_value()
-            if settings.wechat_appsecret
-            else ""
+            settings.wechat_appsecret.get_secret_value() if settings.wechat_appsecret else ""
         )
         self.template_id = settings.wechat_template_id
         self.openid = settings.wechat_openid

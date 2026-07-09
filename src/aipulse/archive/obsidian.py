@@ -35,9 +35,7 @@ class ObsidianArchiver(Archiver):
     ) -> ArchivePaths:
         """Archive source and summary notes to the configured Obsidian vault."""
         if not self.is_configured():
-            raise FileNotFoundError(
-                f"Obsidian vault path does not exist: {self.vault_path}"
-            )
+            raise FileNotFoundError(f"Obsidian vault path does not exist: {self.vault_path}")
 
         content_type = getattr(content, "platform", "unknown") or "unknown"
         url = getattr(content, "url", "") or ""

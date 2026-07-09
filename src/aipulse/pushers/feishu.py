@@ -19,11 +19,7 @@ class FeishuPushStrategy(PushStrategy):
 
     def __init__(self, settings: AppSettings, client: httpx.AsyncClient | None = None):
         self.webhook_url = settings.feishu_webhook_url
-        self.secret = (
-            settings.feishu_secret.get_secret_value()
-            if settings.feishu_secret
-            else ""
-        )
+        self.secret = settings.feishu_secret.get_secret_value() if settings.feishu_secret else ""
         self.client = client or httpx.AsyncClient(timeout=30.0)
 
     def is_configured(self) -> bool:

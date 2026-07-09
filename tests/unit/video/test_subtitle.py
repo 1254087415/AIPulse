@@ -34,7 +34,12 @@ async def test_bilibili_strategy_extracts_subtitle(tmp_path):
     content = ParsedContent(platform="bilibili", url="https://bilibili.com/video/1", title=None)
     sub_info = {
         "subtitles": {
-            "ai-zh": [{"ext": "srt", "data": "1\n00:00:00,000 --> 00:00:01,000\nHello\n\n2\n00:00:01,000 --> 00:00:02,000\nWorld\n"}]
+            "ai-zh": [
+                {
+                    "ext": "srt",
+                    "data": "1\n00:00:00,000 --> 00:00:01,000\nHello\n\n2\n00:00:01,000 --> 00:00:02,000\nWorld\n",
+                }
+            ]
         }
     }
 
@@ -105,9 +110,7 @@ async def test_whisper_strategy_transcribes(tmp_path):
         audio_path=audio_path,
     )
 
-    with patch.object(
-        strategy._transcriber, "transcribe", return_value="transcribed text"
-    ):
+    with patch.object(strategy._transcriber, "transcribe", return_value="transcribed text"):
         result = await strategy.fetch(content, tmp_path)
 
     assert result.source == "whisper"

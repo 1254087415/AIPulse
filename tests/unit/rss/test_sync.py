@@ -28,10 +28,12 @@ def task_repo() -> MagicMock:
 @pytest.fixture
 def parser() -> RssParser:
     parser = RssParser()
-    parser.parse_feed = AsyncMock(return_value=[
-        RssEntryItem(title="Article 1", url="https://example.com/1", published_at=None),
-        RssEntryItem(title="Article 2", url="https://example.com/2", published_at=None),
-    ])
+    parser.parse_feed = AsyncMock(
+        return_value=[
+            RssEntryItem(title="Article 1", url="https://example.com/1", published_at=None),
+            RssEntryItem(title="Article 2", url="https://example.com/2", published_at=None),
+        ]
+    )
     return parser
 
 
@@ -128,9 +130,11 @@ async def test_sync_once_handles_feed_failure(rss_sync: RssSync) -> None:
 
 @pytest.mark.unit
 async def test_sync_once_skips_entries_without_url(rss_sync: RssSync) -> None:
-    rss_sync.parser.parse_feed = AsyncMock(return_value=[
-        RssEntryItem(title="No URL", url="", published_at=None),
-    ])
+    rss_sync.parser.parse_feed = AsyncMock(
+        return_value=[
+            RssEntryItem(title="No URL", url="", published_at=None),
+        ]
+    )
     feed = RssFeed(
         id="feed-1",
         url="https://example.com/feed.xml",

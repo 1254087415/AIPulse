@@ -22,6 +22,16 @@ class JsonRpcError(BaseModel):
     data: Any | None = None
 
 
+class JsonRpcApplicationError(Exception):
+    """Raised by handlers to return a specific JSON-RPC error response."""
+
+    def __init__(self, code: int, message: str, data: Any | None = None):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.data = data
+
+
 class JsonRpcResponse(BaseModel):
     """Outgoing JSON-RPC response."""
 

@@ -47,9 +47,7 @@ async def test_wechat_extractor_parses_page():
     extractor = WechatExtractor()
     with patch("aipulse.article.extractor.httpx.AsyncClient") as mock_client:
         instance = mock_client.return_value.__aenter__.return_value
-        instance.get.return_value = MagicMock(
-            text=WECHAT_HTML, raise_for_status=MagicMock()
-        )
+        instance.get.return_value = MagicMock(text=WECHAT_HTML, raise_for_status=MagicMock())
         result = await extractor.extract("https://mp.weixin.qq.com/s/abc")
 
     assert isinstance(result, ExtractedArticle)
@@ -78,9 +76,7 @@ async def test_generic_extractor_uses_readability():
     extractor = GenericArticleExtractor()
     with patch("aipulse.article.extractor.httpx.AsyncClient") as mock_client:
         instance = mock_client.return_value.__aenter__.return_value
-        instance.get.return_value = MagicMock(
-            text=ARTICLE_HTML, raise_for_status=MagicMock()
-        )
+        instance.get.return_value = MagicMock(text=ARTICLE_HTML, raise_for_status=MagicMock())
         result = await extractor.extract("https://example.com/article")
 
     assert isinstance(result, ExtractedArticle)

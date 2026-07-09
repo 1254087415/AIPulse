@@ -97,12 +97,17 @@ async def test_sidecar_main_loop_with_mocked_stdio(
     )
     input_lines = [
         json.dumps({"jsonrpc": "2.0", "id": 1, "method": "get_settings"}),
-        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "submit_url", "params": {"url": "https://example.com"}}),
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "submit_url",
+                "params": {"url": "https://example.com"},
+            }
+        ),
     ]
     stdin = MagicMock()
-    stdin.readline = AsyncMock(
-        side_effect=[line.encode("utf-8") for line in input_lines] + [b""]
-    )
+    stdin.readline = AsyncMock(side_effect=[line.encode("utf-8") for line in input_lines] + [b""])
     stdout_lines: list[str] = []
     stdout = MagicMock()
     stdout.write = stdout_lines.append

@@ -40,6 +40,8 @@ def _register_default_strategies(registry: PushStrategyRegistry, settings: AppSe
     """Register built-in push strategies."""
     from aipulse.pushers.feishu import FeishuPushStrategy
     from aipulse.pushers.wechat import WechatPushStrategy
+    from aipulse.pushers.wechat_bot import WechatBotPushStrategy
 
     registry.register("feishu", FeishuPushStrategy(settings))
     registry.register("wechat", WechatPushStrategy(settings))
+    registry.register("wechat_bot", WechatBotPushStrategy(settings))

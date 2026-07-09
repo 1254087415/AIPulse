@@ -31,7 +31,7 @@ from aipulse.core.article_pipeline import ArticlePipeline
 from aipulse.core.config import AppSettings, get_settings, reset_settings
 from aipulse.core.content_router import ContentType
 from aipulse.core.pipeline import PipelineContext, PipelineEvent, PipelineObserver
-from aipulse.core.rpc import JsonRpcRequest, JsonRpcResponse
+from aipulse.core.rpc import JsonRpcApplicationError, JsonRpcRequest, JsonRpcResponse
 from aipulse.core.video_pipeline import VideoPipeline
 from aipulse.store.database import close_db, get_session_maker, init_db
 from aipulse.store.repository import TaskRepository
@@ -101,9 +101,7 @@ class Sidecar:
             try:
                 validated = JsonRpcRequest.model_validate(raw_request)
             except ValidationError:
-                return JsonRpcResponse.failure(
-                    raw_request.get("id"), -32600, "invalid request"
-                )
+                return JsonRpcResponse.failure(raw_request.get("id"), -32600, "invalid request")
         else:
             validated = raw_request
         handlers = {
@@ -122,11 +120,13 @@ class Sidecar:
         try:
             result = await handler(validated.params)
             return JsonRpcResponse.success(validated.id, result)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Handler %s failed", validated.method)
+        except JsonRpcApplicationError as exc:
             return JsonRpcResponse.failure(
-                validated.id, -32603, "internal error"
+                validated.id, exc.code, exc.message, exc.data
             )
+        except Exception:  # noqa: BLE001
+            logger.exception("Handler %s failed", validated.method)
+            return JsonRpcResponse.failure(validated.id, -32603, "internal error")
 
     async def _submit_url(self, params: dict[str, Any]) -> dict[str, Any]:
         url = params.get("url")
@@ -223,7 +223,12 @@ class Sidecar:
         return self.settings.to_public_dict()
 
     async def _update_settings(self, params: dict[str, Any]) -> dict[str, Any]:
-        self.settings = self.settings.update(**params)
+        try:
+            self.settings = self.settings.update(**params)
+        except ValueError as exc:
+            raise JsonRpcApplicationError(
+                -32602, f"Invalid settings: {exc}"
+            ) from exc
         self.settings.save()
         reset_settings()
         return self.settings.to_public_dict()
@@ -302,9 +307,7 @@ class Sidecar:
             repo = TaskRepository(session)
             fields: dict[str, Any] = {
                 "title": ctx.metadata.get("title"),
-                "raw_content_path": (
-                    str(ctx.downloaded_path) if ctx.downloaded_path else None
-                ),
+                "raw_content_path": (str(ctx.downloaded_path) if ctx.downloaded_path else None),
                 "transcript": ctx.transcript,
                 "summary": ctx.summary.raw_markdown if ctx.summary else None,
                 "key_moments": ctx.summary.key_points if ctx.summary else None,
@@ -364,9 +367,7 @@ class Sidecar:
         self._tasks[task_id] = {
             **cached,
             "status": status,
-            "progress_pct": (
-                100 if status == "success" else cached.get("progress_pct", 0)
-            ),
+            "progress_pct": (100 if status == "success" else cached.get("progress_pct", 0)),
         }
         self._emit_notification(
             "task_complete",
@@ -411,9 +412,7 @@ async def main() -> None:
             except json.JSONDecodeError as exc:
                 response = JsonRpcResponse.failure(None, -32700, f"parse error: {exc}")
             except Exception as exc:  # noqa: BLE001
-                response = JsonRpcResponse.failure(
-                    None, -32600, f"invalid request: {exc}"
-                )
+                response = JsonRpcResponse.failure(None, -32600, f"invalid request: {exc}")
             else:
                 response = await sidecar.handle_request(request)
                 if response is None:
