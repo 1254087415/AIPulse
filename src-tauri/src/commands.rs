@@ -44,6 +44,19 @@ pub async fn get_task_status(
 }
 
 #[tauri::command]
+pub async fn list_tasks(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let params = serde_json::json!({"limit": limit.unwrap_or(50).min(200)});
+    let response = state
+        .send_request("list_tasks", params)
+        .await
+        .map_err(|e| e.to_string())?;
+    unwrap_response(response)
+}
+
+#[tauri::command]
 pub async fn retry_task(state: State<'_, AppState>, task_id: String) -> Result<(), String> {
     let params = serde_json::json!({"task_id": task_id});
     let response = state
@@ -77,7 +90,7 @@ pub async fn update_settings(
 
 #[tauri::command]
 #[allow(deprecated)]
-pub async fn open_obsidian(handle: AppHandle, _: ()) -> Result<(), String> {
+pub async fn open_obsidian(handle: AppHandle) -> Result<(), String> {
     let state = handle.state::<AppState>();
     let settings = state
         .send_request("get_settings", serde_json::json!({}))
@@ -100,64 +113,128 @@ pub async fn open_obsidian(handle: AppHandle, _: ()) -> Result<(), String> {
     Ok(())
 }
 
+fn hide_window_by_label<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    label: &str,
+) -> Result<(), String> {
+    let window = handle
+        .get_webview_window(label)
+        .ok_or_else(|| format!("window not found: {label}"))?;
+    window.hide().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
-pub fn show_input_window(handle: AppHandle, _: ()) -> Result<(), String> {
-    show_or_create_window(
+pub fn hide_window<R: tauri::Runtime>(
+    handle: tauri::AppHandle<R>,
+    label: String,
+) -> Result<(), String> {
+    hide_window_by_label(&handle, &label)
+}
+
+#[tauri::command]
+pub fn show_input_window(handle: AppHandle) -> Result<(), String> {
+    center_window(
         &handle,
         "input",
-        WebviewUrl::App("/input".into()),
-        420.0,
-        180.0,
+        WebviewUrl::App("index.html#/input".into()),
+        560.0,
+        640.0,
     )
 }
 
 #[tauri::command]
-pub fn open_settings_window(handle: AppHandle, _: ()) -> Result<(), String> {
-    show_or_create_window(
+pub fn open_settings_window(handle: AppHandle) -> Result<(), String> {
+    center_window(
         &handle,
         "settings",
-        WebviewUrl::App("/settings".into()),
+        WebviewUrl::App("index.html#/settings".into()),
         640.0,
         480.0,
     )
 }
 
 #[tauri::command]
-pub fn open_tasks_window(handle: AppHandle, _: ()) -> Result<(), String> {
-    show_or_create_window(
+pub fn open_tasks_window(handle: AppHandle) -> Result<(), String> {
+    center_window(
         &handle,
         "tasks",
-        WebviewUrl::App("/tasks".into()),
+        WebviewUrl::App("index.html#/tasks".into()),
         720.0,
         480.0,
     )
 }
 
-fn show_or_create_window(
-    handle: &AppHandle,
+fn show_or_create_window<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
     label: &str,
     url: WebviewUrl,
     width: f64,
     height: f64,
+    position: Option<tauri::Position>,
 ) -> Result<(), String> {
     if let Some(window) = handle.get_webview_window(label) {
+        if let Some(pos) = position {
+            window.set_position(pos).map_err(|e| e.to_string())?;
+        }
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
 
-    WebviewWindow::builder(handle, label, url)
+    let mut builder = WebviewWindow::builder(handle, label, url)
         .title(label)
         .inner_size(width, height)
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
+        .decorations(false)
         .always_on_top(true)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
+        .skip_taskbar(true)
+        .accept_first_mouse(true)
+        .focused(true)
+        .visible(true)
+        .shadow(true);
+
+    if let Some(pos) = position {
+        let (x, y) = match pos {
+            tauri::Position::Physical(p) => (p.x as f64, p.y as f64),
+            tauri::Position::Logical(p) => (p.x, p.y),
+        };
+        builder = builder.position(x, y);
+    } else {
+        builder = builder.center();
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+pub fn show_input_window_at<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    position: tauri::Position,
+) -> Result<(), String> {
+    show_or_create_window(
+        handle,
+        "input",
+        WebviewUrl::App("index.html#/input".into()),
+        560.0,
+        640.0,
+        Some(position),
+    )
+}
+
+pub fn center_window<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    label: &str,
+    url: WebviewUrl,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    show_or_create_window(handle, label, url, width, height, None)
 }
 
 #[cfg(test)]
@@ -196,5 +273,67 @@ mod tests {
             unwrap_response(response).unwrap_err(),
             "something went wrong"
         );
+    }
+
+    #[test]
+    fn unwrap_response_returns_err_when_both_result_and_error_present() {
+        let response = SidecarResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1),
+            result: Some(serde_json::json!({"task_id": "abc"})),
+            error: Some(SidecarError {
+                code: -1,
+                message: "something went wrong".to_string(),
+                data: None,
+            }),
+        };
+        assert_eq!(
+            unwrap_response(response).unwrap_err(),
+            "something went wrong"
+        );
+    }
+
+    #[test]
+    fn unwrap_response_returns_err_when_both_missing() {
+        let response = SidecarResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1),
+            result: None,
+            error: None,
+        };
+        let err = unwrap_response(response).unwrap_err();
+        assert!(err.contains("missing result and error"));
+    }
+
+    #[test]
+    fn hide_window_command_errors_for_missing_label() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+        let err = hide_window_by_label(handle, "missing").unwrap_err();
+        assert!(err.contains("window not found"));
+    }
+
+    #[test]
+    fn show_or_create_window_finds_existing_window() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+
+        let _window = tauri::WebviewWindowBuilder::new(
+            handle,
+            "existing",
+            WebviewUrl::App("/existing".into()),
+        )
+        .build()
+        .expect("mock window can be created");
+
+        let result = show_or_create_window(
+            handle,
+            "existing",
+            WebviewUrl::App("/existing".into()),
+            100.0,
+            100.0,
+            None,
+        );
+        assert!(result.is_ok());
     }
 }

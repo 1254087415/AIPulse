@@ -48,6 +48,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             submit_url,
             get_task_status,
+            list_tasks,
             retry_task,
             get_settings,
             update_settings,
@@ -90,8 +91,28 @@ async fn setup_sidecar(handle: &AppHandle) -> Result<()> {
     let python_path = python_runner::find_python_executable(handle).await?;
     let sidecar_script = python_runner::find_sidecar_script(handle).await?;
 
+    let app_data_dir = handle
+        .path()
+        .app_data_dir()
+        .context("failed to resolve app data dir")?;
+    let data_dir = app_data_dir.join("data");
+    let downloads_dir = data_dir.join("downloads");
+    tokio::fs::create_dir_all(&data_dir)
+        .await
+        .context("failed to create data dir")?;
+    tokio::fs::create_dir_all(&downloads_dir)
+        .await
+        .context("failed to create downloads dir")?;
+    let database_url = format!(
+        "sqlite+aiosqlite:///{}/aipulse.db",
+        data_dir.to_string_lossy()
+    );
+
     let mut child = Command::new(&python_path)
         .arg(&sidecar_script)
+        .env("DATA_DIR", &data_dir)
+        .env("DOWNLOAD_DIR", &downloads_dir)
+        .env("DATABASE_URL", &database_url)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -242,25 +263,45 @@ fn setup_tray(handle: &AppHandle) -> Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::Click { .. } = event {
+            if let tauri::tray::TrayIconEvent::Click { rect, .. } = event {
                 let handle = tray.app_handle();
-                let _ = show_input_window(handle.clone(), ());
+                let width = 560.0;
+                let _height = 640.0;
+                let (icon_x, icon_y) = match rect.position {
+                    tauri::Position::Physical(pos) => (pos.x as f64, pos.y as f64),
+                    tauri::Position::Logical(pos) => (pos.x, pos.y),
+                };
+                let icon_width = match rect.size {
+                    tauri::Size::Physical(size) => size.width as f64,
+                    tauri::Size::Logical(size) => size.width,
+                };
+                let icon_height = match rect.size {
+                    tauri::Size::Physical(size) => size.height as f64,
+                    tauri::Size::Logical(size) => size.height,
+                };
+                let x = icon_x + (icon_width / 2.0) - (width / 2.0);
+                let y = icon_y + icon_height;
+                let position = tauri::Position::Physical(tauri::PhysicalPosition {
+                    x: x as i32,
+                    y: y as i32,
+                });
+                let _ = commands::show_input_window_at(handle, position);
             }
         })
         .on_menu_event(|handle, event| match event.id().as_ref() {
             "input" => {
-                let _ = show_input_window(handle.clone(), ());
+                let _ = show_input_window(handle.clone());
             }
             "tasks" => {
-                let _ = open_tasks_window(handle.clone(), ());
+                let _ = open_tasks_window(handle.clone());
             }
             "settings" => {
-                let _ = open_settings_window(handle.clone(), ());
+                let _ = open_settings_window(handle.clone());
             }
             "obsidian" => {
                 let handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    let _ = open_obsidian(handle, ()).await;
+                    let _ = open_obsidian(handle).await;
                 });
             }
             "quit" => {

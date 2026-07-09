@@ -10,10 +10,20 @@ from pathlib import Path
 from typing import Any
 
 # ruff: noqa: E402
-# Ensure project source is on PYTHONPATH during development.
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-if str(PROJECT_ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+# Ensure project source is on PYTHONPATH during development and when bundled.
+_SCRIPT_PATH = Path(__file__).resolve()
+_PROJECT_ROOT = _SCRIPT_PATH.parents[3]
+_DEV_SRC = _PROJECT_ROOT / "src"
+if _DEV_SRC.exists():
+    # Development layout: sidecar.py is at src/aipulse/desktop/sidecar.py.
+    if str(_DEV_SRC) not in sys.path:
+        sys.path.insert(0, str(_DEV_SRC))
+else:
+    # Bundled layout: sidecar.py is at Contents/Resources/aipulse/desktop/sidecar.py
+    # and the aipulse package lives next to us under Contents/Resources/aipulse/.
+    _RESOURCES_DIR = _SCRIPT_PATH.parents[2]
+    if str(_RESOURCES_DIR) not in sys.path:
+        sys.path.insert(0, str(_RESOURCES_DIR))
 
 from pydantic import ValidationError
 
@@ -99,6 +109,7 @@ class Sidecar:
         handlers = {
             "submit_url": self._submit_url,
             "get_task_status": self._get_task_status,
+            "list_tasks": self._list_tasks,
             "retry_task": self._retry_task,
             "get_settings": self._get_settings,
             "update_settings": self._update_settings,
@@ -114,7 +125,7 @@ class Sidecar:
         except Exception as exc:  # noqa: BLE001
             logger.exception("Handler %s failed", validated.method)
             return JsonRpcResponse.failure(
-                validated.id, -32603, f"internal error: {exc}"
+                validated.id, -32603, "internal error"
             )
 
     async def _submit_url(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +174,26 @@ class Sidecar:
             "progress_pct": cached.get("progress_pct", 0),
             "message": cached.get("message", ""),
             "error_message": task.error_message,
+        }
+
+    async def _list_tasks(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = min(int(params.get("limit", 50)), 200)
+        session_maker = get_session_maker()
+        async with session_maker() as session:
+            repo = TaskRepository(session)
+            tasks = await repo.list_recent(limit=limit)
+        return {
+            "tasks": [
+                {
+                    "id": task.id,
+                    "url": task.url,
+                    "status": task.status,
+                    "title": task.title,
+                    "error_message": task.error_message,
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                }
+                for task in tasks
+            ]
         }
 
     async def _retry_task(self, params: dict[str, Any]) -> dict[str, Any]:

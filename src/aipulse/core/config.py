@@ -85,18 +85,21 @@ class AppSettings(BaseSettings):
         return self.data_dir / "settings.json"
 
     def save(self) -> None:
-        """Persist non-secret overrides to a JSON file under data/settings.json."""
-        public = self.to_public_dict()
-        # Only persist keys that are safe to write and may be changed at runtime.
+        """Persist runtime overrides to a JSON file under data/settings.json."""
+        payload = self.to_client_dict()
+        # Only persist keys that may be changed at runtime.
         persist_keys = {
             "llm_provider",
             "llm_base_url",
             "llm_model",
+            "llm_api_key",
             "whisper_model",
             "obsidian_vault_path",
             "obsidian_archive_folder",
             "feishu_webhook_url",
+            "feishu_secret",
             "wechat_appid",
+            "wechat_appsecret",
             "wechat_template_id",
             "wechat_openid",
             "data_dir",
@@ -107,7 +110,7 @@ class AppSettings(BaseSettings):
             "ytdlp_user_agent",
             "http_user_agent_mobile",
         }
-        payload = {key: public[key] for key in persist_keys if key in public}
+        payload = {key: payload[key] for key in persist_keys if key in payload}
         try:
             self.settings_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, default=str),
@@ -118,7 +121,7 @@ class AppSettings(BaseSettings):
             raise
 
     def to_public_dict(self) -> dict[str, Any]:
-        """Return a public-safe dict with secrets masked."""
+        """Return a public-safe dict with secrets masked (for logs)."""
         result: dict[str, Any] = {}
         for key, value in self.model_dump().items():
             if key in _SECRET_KEYS:
@@ -127,12 +130,23 @@ class AppSettings(BaseSettings):
                 result[key] = value
         return result
 
+    def to_client_dict(self) -> dict[str, Any]:
+        """Return a plain dict with real secret values for the UI."""
+        result: dict[str, Any] = {}
+        for key, value in self.model_dump().items():
+            if key in _SECRET_KEYS and isinstance(value, SecretStr):
+                result[key] = value.get_secret_value()
+            else:
+                result[key] = value
+        return result
+
     def update(self, **changes: Any) -> "AppSettings":
         """Return a new settings instance with the given changes applied."""
         current = self.model_dump()
         for key in _SECRET_KEYS:
-            if key in changes and changes[key]:
-                current[key] = changes[key]
+            new_value = changes.get(key)
+            if new_value and not self._is_masked_secret(new_value):
+                current[key] = new_value
             elif key not in changes:
                 current[key] = self._get_secret_value(key)
         for key, value in changes.items():
@@ -166,6 +180,11 @@ class AppSettings(BaseSettings):
         if len(raw) <= 8:
             return "***"
         return raw[:4] + "***" + raw[-4:]
+
+    @staticmethod
+    def _is_masked_secret(value: Any) -> bool:
+        """Return True if value looks like a masked secret returned to the UI."""
+        return "***" in str(value)
 
 
 @lru_cache(maxsize=1)

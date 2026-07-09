@@ -49,29 +49,60 @@ fn sidecar_candidate(base_dir: &Path) -> Option<PathBuf> {
 
 /// Find the Python interpreter for the running Tauri app.
 ///
-/// Prefers the bundled interpreter in the app resource directory, then the
-/// project virtual environment, and finally a system interpreter.
+/// Prefers the interpreter bundled under the app resource directory, then the
+/// project virtual environment, and finally a system interpreter found on
+/// `PATH`. In release builds only the bundled and system fallbacks are used to
+/// avoid executing a binary from an attacker-controlled working directory.
 pub async fn find_python_executable(handle: &AppHandle) -> Result<PathBuf> {
     let resource_dir = handle.path().resource_dir()?;
     if let Some(candidate) = python_candidate(&resource_dir) {
         return Ok(candidate);
     }
 
-    for root in project_root_candidates() {
-        if let Some(candidate) = python_candidate(&root) {
-            return Ok(candidate);
+    // Development fallback: if the executable is not inside an app bundle, also
+    // search the project directory for a virtual environment.
+    if !is_running_from_bundle() {
+        for root in project_root_candidates() {
+            if let Some(candidate) = python_candidate(&root) {
+                return Ok(candidate);
+            }
         }
     }
 
     find_python_executable_at(Path::new("."))
 }
 
+/// Heuristic to detect whether the current process is running from a bundled
+/// macOS app.
+fn is_running_from_bundle() -> bool {
+    std::env::current_exe()
+        .ok()
+        .map(|path| {
+            let lossy = path.to_string_lossy();
+            lossy.contains(".app/Contents/MacOS/")
+        })
+        .unwrap_or(false)
+}
+
 /// Find the sidecar Python script for the running Tauri app.
 ///
-/// Prefers the bundled script in the app resource directory, then the
-/// development source layout relative to discovered project roots.
+/// Prefers the bundled script in the app resource directory
+/// (`aipulse/desktop/sidecar.py`), then the legacy flat layout
+/// (`sidecar.py`), then development source layouts relative to discovered
+/// project roots.
 pub async fn find_sidecar_script(handle: &AppHandle) -> Result<PathBuf> {
     let resource_dir = handle.path().resource_dir()?;
+    let resource_sidecar = resource_dir
+        .join("aipulse")
+        .join("desktop")
+        .join("sidecar.py");
+    if resource_sidecar.exists() {
+        return Ok(resource_sidecar);
+    }
+    let legacy_sidecar = resource_dir.join("sidecar.py");
+    if legacy_sidecar.exists() {
+        return Ok(legacy_sidecar);
+    }
     if let Some(candidate) = sidecar_candidate(&resource_dir) {
         return Ok(candidate);
     }

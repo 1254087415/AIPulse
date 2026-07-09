@@ -186,3 +186,6 @@ playwright-report/
 extensions/chromium/dist/
 extensions/chromium/node_modules/
 extensions/chromium/tests/.tmp/
+
+# Generated Tauri sidecar resources (synced from src/aipulse by build script)
+src-tauri/resources/

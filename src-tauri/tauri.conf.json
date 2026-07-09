@@ -7,7 +7,7 @@
     "frontendDist": "../frontend/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "cd ../frontend && npm run dev",
-    "beforeBuildCommand": "cd ../frontend && npm run build"
+    "beforeBuildCommand": "cd .. && ./scripts/sync-sidecar-resources.sh && cd frontend && npm run build"
   },
   "app": {
     "windows": [],
@@ -29,11 +29,14 @@
       "frameworks": [],
       "infoPlist": "Info.plist",
       "minimumSystemVersion": "12.0"
+    },
+    "resources": {
+      "resources/aipulse": "aipulse"
     }
   },
   "plugins": {
     "shell": {
-      "open": "^https?://"
+      "open": "^(https?://|obsidian://open\\?vault=)"
     }
   }
 }
