@@ -11,6 +11,8 @@ const TRACKING_PARAMS = [
   'share_source',
   'share_medium',
   'timestamp',
+  'vd_source',
+  'spm_id_from',
 ];
 
 export function cleanTrackingParams(url: string): string {

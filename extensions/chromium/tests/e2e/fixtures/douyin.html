@@ -2,11 +2,14 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <title>Douyin Test Fixture</title>
+    <title>抖音精选电脑版 - 抖音旗下优质视频平台</title>
   </head>
   <body>
     <h1>Douyin Fixture</h1>
-    <a href="https://www.douyin.com/video/1234567890">Video</a>
+    <!-- Real Douyin desktop uses div cards with protocol-relative hrefs -->
+    <div href="//www.douyin.com/video/1234567890">Video Card 1</div>
+    <div data-aweme-id="0987654321">Video Card 2</div>
+    <a href="https://www.douyin.com/video/1111111111">Legacy Anchor</a>
     <script>
       window.__DOUYIN_SHARE_URL__ = 'https://v.douyin.com/AbCdEfG';
     </script>

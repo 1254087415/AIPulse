@@ -4,12 +4,34 @@ import type { FoundLink, SubmitMode, SubmitPayload, SubmitResult } from './types
 import { cleanTrackingParams, dedupeLinks } from './utils';
 
 const ALLOWED_MODES: SubmitMode[] = ['archive', 'knowledge_check'];
+const FOUND_LINKS_KEY = 'foundLinks';
 
 interface BackgroundMessage {
-  type: 'FOUND_LINKS' | 'SUBMIT_URL' | 'GET_FOUND_LINKS';
+  type: 'FOUND_LINKS' | 'SUBMIT_URL' | 'GET_FOUND_LINKS' | 'FETCH_JSON';
   links?: FoundLink[];
   url?: unknown;
+  title?: unknown;
   mode?: unknown;
+  tags?: unknown;
+  subtitle_text?: unknown;
+  subtitle_language?: unknown;
+}
+
+function isValidSubtitleText(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isValidSubtitleLanguage(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isValidTitle(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isValidTags(value: unknown): value is string[] {
+  if (!Array.isArray(value)) return false;
+  return value.every((item) => typeof item === 'string' && item.length > 0);
 }
 
 function isValidUrl(value: unknown): value is string {
@@ -31,7 +53,66 @@ function errorMessage(err: unknown): string {
   return String(err);
 }
 
-let foundLinksCache: FoundLink[] = [];
+function isBiliRequest(url: string): boolean {
+  return /(?:api\.bilibili\.com|hdslb\.com)/.test(url);
+}
+
+async function fetchJsonThroughBackground(url: string): Promise<unknown> {
+  const headers = new Headers();
+  if (isBiliRequest(url)) {
+    headers.set('Accept', 'application/json, text/plain, */*');
+    headers.set('Accept-Language', 'zh-CN,zh;q=0.9,en;q=0.8');
+    headers.set('Cache-Control', 'no-cache');
+    headers.set('Pragma', 'no-cache');
+  }
+
+  const options: RequestInit = {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+    headers,
+  };
+  if (isBiliRequest(url)) {
+    options.referrer = 'https://www.bilibili.com/';
+    options.referrerPolicy = 'strict-origin-when-cross-origin';
+  }
+
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+function getStorage(): chrome.storage.LocalStorageArea | undefined {
+  return typeof chrome !== 'undefined' ? chrome.storage?.local : undefined;
+}
+
+async function loadFoundLinks(): Promise<FoundLink[]> {
+  const storage = getStorage();
+  if (!storage) return [];
+  return new Promise((resolve) => {
+    storage.get(FOUND_LINKS_KEY, (result) => {
+      const links = result?.[FOUND_LINKS_KEY];
+      resolve(Array.isArray(links) ? links : []);
+    });
+  });
+}
+
+async function saveFoundLinks(links: FoundLink[]): Promise<void> {
+  const storage = getStorage();
+  if (!storage) return;
+  return new Promise((resolve) => {
+    storage.set({ [FOUND_LINKS_KEY]: links }, () => resolve());
+  });
+}
+
+async function updateBadge(links: FoundLink[]): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.action) return;
+  const count = links.length;
+  chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
+  chrome.action.setBadgeBackgroundColor({ color: '#1677ff' });
+}
 
 export function handleMessage(
   message: BackgroundMessage,
@@ -39,24 +120,38 @@ export function handleMessage(
   sendResponse: (response: unknown) => void
 ): boolean {
   if (message.type === 'FOUND_LINKS' && message.links) {
-    foundLinksCache = dedupeLinks(message.links);
-    if (typeof chrome !== 'undefined' && chrome.action) {
-      const count = foundLinksCache.length;
-      chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-      chrome.action.setBadgeBackgroundColor({ color: '#1677ff' });
-    }
-    sendResponse({ ok: true, count: foundLinksCache.length });
-    return false;
+    const deduped = dedupeLinks(message.links);
+    saveFoundLinks(deduped)
+      .then(() => updateBadge(deduped))
+      .then(() => sendResponse({ ok: true, count: deduped.length }))
+      .catch((err: unknown) => sendResponse({ ok: false, error: errorMessage(err) }));
+    return true;
   }
 
   if (message.type === 'GET_FOUND_LINKS') {
-    sendResponse({ links: foundLinksCache });
-    return false;
+    loadFoundLinks()
+      .then((links) => sendResponse({ links }))
+      .catch((err: unknown) => sendResponse({ links: [], error: errorMessage(err) }));
+    return true;
   }
 
   if (message.type === 'SUBMIT_URL' && isValidUrl(message.url) && isValidMode(message.mode)) {
-    submitUrl(message.url, message.mode)
+    submitUrl(
+      message.url,
+      message.mode,
+      isValidTitle(message.title) ? message.title : undefined,
+      isValidTags(message.tags) ? message.tags : undefined,
+      isValidSubtitleText(message.subtitle_text) ? message.subtitle_text : undefined,
+      isValidSubtitleLanguage(message.subtitle_language) ? message.subtitle_language : undefined
+    )
       .then((result) => sendResponse({ ok: true, result }))
+      .catch((err: unknown) => sendResponse({ ok: false, error: errorMessage(err) }));
+    return true;
+  }
+
+  if (message.type === 'FETCH_JSON' && isValidUrl(message.url)) {
+    fetchJsonThroughBackground(message.url)
+      .then((data) => sendResponse({ ok: true, data }))
       .catch((err: unknown) => sendResponse({ ok: false, error: errorMessage(err) }));
     return true;
   }
@@ -90,12 +185,23 @@ export function handleContextMenuClick(info: chrome.contextMenus.OnClickData): v
   }
 }
 
-async function submitUrl(url: string, mode: SubmitMode): Promise<SubmitResult> {
+async function submitUrl(
+  url: string,
+  mode: SubmitMode,
+  title?: string,
+  tags?: string[],
+  subtitleText?: string,
+  subtitleLanguage?: string
+): Promise<SubmitResult> {
   const cleaned = cleanTrackingParams(url);
   const payload: SubmitPayload = {
     url: cleaned,
     source: 'browser_extension',
     mode,
+    title,
+    tags,
+    subtitle_text: subtitleText,
+    subtitle_language: subtitleLanguage,
   };
 
   try {
@@ -105,7 +211,7 @@ async function submitUrl(url: string, mode: SubmitMode): Promise<SubmitResult> {
   }
 }
 
-export { submitUrl, foundLinksCache };
+export { submitUrl };
 
 if (typeof chrome !== 'undefined') {
   chrome.runtime.onMessage.addListener(handleMessage);

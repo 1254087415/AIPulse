@@ -6,7 +6,7 @@ import { extractWechatLinks } from './wechat';
 
 export interface PlatformExtractor {
   name: string;
-  extract: (document: Document, url: string) => FoundLink[];
+  extract: (document: Document, url: string) => FoundLink[] | Promise<FoundLink[]>;
 }
 
 export const PLATFORM_EXTRACTORS: PlatformExtractor[] = [
@@ -16,10 +16,11 @@ export const PLATFORM_EXTRACTORS: PlatformExtractor[] = [
   { name: 'wechat', extract: extractWechatLinks },
 ];
 
-export function extractAllLinks(document: Document, url: string): FoundLink[] {
+export async function extractAllLinks(document: Document, url: string): Promise<FoundLink[]> {
   const links: FoundLink[] = [];
   for (const extractor of PLATFORM_EXTRACTORS) {
-    links.push(...extractor.extract(document, url));
+    const result = extractor.extract(document, url);
+    links.push(...(await result));
   }
   return links;
 }

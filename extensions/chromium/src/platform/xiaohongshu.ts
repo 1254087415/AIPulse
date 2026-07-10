@@ -7,6 +7,10 @@ const XHS_PATTERNS = [
     platform: 'xiaohongshu' as const,
   },
   {
+    pattern: /https?:\/\/(?:www\.)?xiaohongshu\.com\/discovery\/item\/[\w]+/i,
+    platform: 'xiaohongshu' as const,
+  },
+  {
     pattern: /https?:\/\/xhslink\.com\/[\w]+/i,
     platform: 'xiaohongshu' as const,
   },

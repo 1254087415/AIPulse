@@ -8,6 +8,10 @@ export default defineConfig(({ mode }) => ({
     webExtension({
       manifest: 'manifest.json',
       additionalInputs: ['src/content.ts', 'src/context.ts', 'src/background.ts'],
+      skipManifestValidation: true,
+      // ^ vite-plugin-web-extension fetches the manifest schema from SchemaStore on
+      // every build; that endpoint rate-limits (429) and breaks CI. The local
+      // manifest.json is still emitted and loaded by the browser.
     }),
   ],
   define: {

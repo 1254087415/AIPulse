@@ -112,7 +112,7 @@ test.describe('AIPulse Clipper E2E', () => {
     const cases = [
       { page: 'bilibili.html', expectedUrl: 'https://www.bilibili.com/video/BV1xx411c7mD' },
       { page: 'douyin.html', expectedUrl: 'https://www.douyin.com/video/1234567890' },
-      { page: 'xiaohongshu.html', expectedUrl: 'https://www.xiaohongshu.com/explore/abc123' },
+      { page: 'xiaohongshu.html', expectedUrl: 'https://www.xiaohongshu.com/discovery/item/647b0af200000000130034f9' },
       { page: 'wechat.html', expectedUrl: 'https://mp.weixin.qq.com/s/abcdef' },
     ];
 

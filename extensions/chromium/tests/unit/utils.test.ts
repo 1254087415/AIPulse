@@ -7,6 +7,12 @@ describe('cleanTrackingParams', () => {
     expect(cleanTrackingParams(url)).toBe('https://www.bilibili.com/video/BV1xx411c7mD');
   });
 
+  it('strips bilibili vd_source and trailing slash', () => {
+    const url =
+      'https://www.bilibili.com/video/BV1JRMb6qE5H/?spm_id_from=333.1365.list.card_archive.click&vd_source=b8dd888f48bd000885ca4528e68fb34e';
+    expect(cleanTrackingParams(url)).toBe('https://www.bilibili.com/video/BV1JRMb6qE5H/');
+  });
+
   it('returns original url when parse fails', () => {
     expect(cleanTrackingParams('not-a-url')).toBe('not-a-url');
   });

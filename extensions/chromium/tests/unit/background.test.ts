@@ -35,6 +35,12 @@ interface MockChrome {
     onInstalled: MockEvent;
     connectNative: Mock<(name: string) => chrome.runtime.Port>;
   };
+  storage: {
+    local: {
+      get: Mock<(keys: string, callback: (result: Record<string, unknown>) => void) => void>;
+      set: Mock<(items: Record<string, unknown>, callback?: () => void) => void>;
+    };
+  };
   contextMenus: {
     create: Mock<(options: unknown) => void>;
     removeAll: Mock<(callback?: () => void) => void>;
@@ -57,6 +63,8 @@ describe('background message handlers', () => {
     vi.resetModules();
     vi.stubGlobal('fetch', vi.fn());
 
+    const sessionStore: Record<string, unknown> = {};
+
     mockChrome = {
       runtime: {
         onMessage: createMockEvent(),
@@ -65,6 +73,17 @@ describe('background message handlers', () => {
           void name;
           return createMockPort();
         }),
+      },
+      storage: {
+        local: {
+          get: vi.fn((keys: string, callback: (result: Record<string, unknown>) => void) => {
+            callback({ [keys]: sessionStore[keys] });
+          }),
+          set: vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+            Object.assign(sessionStore, items);
+            if (callback) callback();
+          }),
+        },
       },
       contextMenus: {
         create: vi.fn(),
@@ -89,7 +108,7 @@ describe('background message handlers', () => {
     expect(mockChrome.contextMenus.onClicked.addListener).toHaveBeenCalled();
   });
 
-  it('dedupes and caches FOUND_LINKS', () => {
+  it('dedupes and caches FOUND_LINKS', async () => {
     const links: FoundLink[] = [
       { url: 'https://example.com/video/1?utm_source=share', platform: 'test' },
       { url: 'https://example.com/video/1', platform: 'test' },
@@ -99,18 +118,98 @@ describe('background message handlers', () => {
     const sendResponse = vi.fn();
     mockChrome.runtime.onMessage.dispatch({ type: 'FOUND_LINKS', links }, {}, sendResponse);
 
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     expect(sendResponse).toHaveBeenCalledWith({ ok: true, count: 2 });
-    expect(backgroundModule.foundLinksCache).toHaveLength(2);
+
+    const getResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS' }, {}, getResponse);
+    await vi.waitFor(() => expect(getResponse).toHaveBeenCalled());
+    expect(getResponse).toHaveBeenCalledWith({ links: expect.any(Array) });
+    expect(getResponse.mock.calls[0][0].links).toHaveLength(2);
   });
 
-  it('returns cached links on GET_FOUND_LINKS', () => {
+  it('returns cached links on GET_FOUND_LINKS', async () => {
     const cached: FoundLink[] = [{ url: 'https://example.com/cached', platform: 'test' }];
-    mockChrome.runtime.onMessage.dispatch({ type: 'FOUND_LINKS', links: cached }, {}, vi.fn());
+    const setResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'FOUND_LINKS', links: cached }, {}, setResponse);
+    await vi.waitFor(() => expect(setResponse).toHaveBeenCalled());
 
     const sendResponse = vi.fn();
     mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS' }, {}, sendResponse);
 
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
     expect(sendResponse).toHaveBeenCalledWith({ links: cached });
+  });
+
+  it('forwards title and tags in SUBMIT_URL payload', async () => {
+    const httpResult: SubmitResult = { task_id: 'http-2', url: 'https://example.com' };
+    const port = createMockPort();
+    mockChrome.runtime.connectNative.mockReturnValue(port);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => httpResult,
+    } as Response);
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      {
+        type: 'SUBMIT_URL',
+        url: 'https://example.com',
+        title: 'My Title',
+        mode: 'archive',
+        tags: ['foo', 'bar'],
+      },
+      {},
+      sendResponse
+    );
+
+    (port.onDisconnect as unknown as MockEvent).dispatch();
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, result: httpResult });
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/videos/extract',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"title":"My Title"'),
+      })
+    );
+    const body = vi.mocked(fetch).mock.calls[0][1]?.body as string;
+    expect(JSON.parse(body).tags).toEqual(['foo', 'bar']);
+  });
+
+  it('rejects invalid tags and title in SUBMIT_URL', async () => {
+    const port = createMockPort();
+    mockChrome.runtime.connectNative.mockReturnValue(port);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ task_id: 'http-3', url: 'https://example.com' }),
+    } as Response);
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      {
+        type: 'SUBMIT_URL',
+        url: 'https://example.com',
+        title: 123,
+        mode: 'archive',
+        tags: ['foo', 123, 'bar'],
+      },
+      {},
+      sendResponse
+    );
+
+    (port.onDisconnect as unknown as MockEvent).dispatch();
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, result: expect.any(Object) });
+    const body = vi.mocked(fetch).mock.calls[0][1]?.body as string;
+    const parsed = JSON.parse(body);
+    expect(parsed.title).toBeUndefined();
+    expect(parsed.tags).toBeUndefined();
   });
 
   it('uses native messaging result when available', async () => {
@@ -151,6 +250,43 @@ describe('background message handlers', () => {
       })
     );
     expect(result).toEqual(httpResult);
+  });
+
+  it('fetches Bilibili API through background with credentials and referrer', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ code: 0, data: { subtitle: { subtitles: [{ id: 1, subtitle_url: '//aisubtitle.hdslb.com/sub.json' }] } } }),
+    } as Response);
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FETCH_JSON', url: 'https://api.bilibili.com/x/player/v2?cid=1&bvid=BV1xx411c7m' },
+      {},
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({
+      ok: true,
+      data: { code: 0, data: { subtitle: { subtitles: [{ id: 1, subtitle_url: '//aisubtitle.hdslb.com/sub.json' }] } } },
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.bilibili.com/x/player/v2?cid=1&bvid=BV1xx411c7m',
+      expect.objectContaining({
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        referrer: 'https://www.bilibili.com/',
+        referrerPolicy: 'strict-origin-when-cross-origin',
+      })
+    );
+  });
+
+  it('rejects FETCH_JSON with invalid url', async () => {
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'FETCH_JSON', url: 'not-a-url' }, {}, sendResponse);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: 'invalid message' });
   });
 
   it('creates context menus after removing existing ones on install', () => {
