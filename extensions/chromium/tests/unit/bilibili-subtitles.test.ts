@@ -344,7 +344,7 @@ describe('formatSubtitleEntries', () => {
       { from: 0, to: 3, content: 'Hello' },
       { from: 63.5, to: 66, content: 'World' },
     ];
-    expect(formatSubtitleEntries(entries)).toBe('00:00.000 Hello\n01:03.500 World');
+    expect(formatSubtitleEntries(entries)).toBe('00:00 Hello\n01:03 World');
   });
 });
 
