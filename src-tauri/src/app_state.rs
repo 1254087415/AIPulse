@@ -72,7 +72,9 @@ impl AppState {
     pub async fn complete_request(&self, id: u64, response: SidecarResponse) {
         let mut pending = self.pending.lock().await;
         if let Some(sender) = pending.remove(&id) {
-            let _ = sender.send(response);
+            if sender.send(response).is_err() {
+                log::error!("failed to complete sidecar request: receiver dropped");
+            }
         }
     }
 
@@ -226,5 +228,29 @@ mod tests {
 
         assert_eq!(response.result, Some(serde_json::json!({"task_id": "abc"})));
         assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn write_sidecar_errors_when_sidecar_missing() {
+        let state = AppState::default();
+        let err = state.write_sidecar("{}").await.unwrap_err();
+        assert!(err.to_string().contains("sidecar not running"));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn clear_sidecar_removes_handle() {
+        let state = AppState::default();
+        let child = tokio::process::Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("cat is available on unix");
+        state.set_sidecar(child).await.expect("set sidecar");
+
+        state.clear_sidecar().await;
+
+        let err = state.read_sidecar_line().await.unwrap_err();
+        assert!(err.to_string().contains("sidecar not running"));
     }
 }
