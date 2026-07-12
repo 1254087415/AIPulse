@@ -23,20 +23,21 @@ scanAndReport();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'FETCH_SUBTITLE' && message.subtitleUrl) {
-    fetchSubtitleEntries(String(message.subtitleUrl))
-      .then((entries) =>
+    void (async () => {
+      try {
+        const entries = await fetchSubtitleEntries(String(message.subtitleUrl));
         sendResponse({
           ok: true,
           entries,
           formatted: formatSubtitleEntries(entries),
-        })
-      )
-      .catch((error: unknown) =>
+        });
+      } catch (error: unknown) {
         sendResponse({
           ok: false,
           error: error instanceof Error ? error.message : String(error),
-        })
-      );
+        });
+      }
+    })();
     return true;
   }
   return false;

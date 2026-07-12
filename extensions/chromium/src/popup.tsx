@@ -84,27 +84,22 @@ function Popup() {
 
   const subtitleOptions = currentLink?.metadata?.subtitleOptions || [];
 
-  const loadState = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (chrome.runtime.lastError) {
-        setStatus(`获取页面失败: ${chrome.runtime.lastError.message}`);
-        setIsError(true);
-        return;
-      }
-      const url = tabs[0]?.url || '';
+  const loadState = async () => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const url = tab?.url || '';
       setTabUrl(url);
-      setTabId(tabs[0]?.id);
+      setTabId(tab?.id);
 
-      chrome.runtime.sendMessage({ type: 'GET_FOUND_LINKS' }, (response) => {
-        if (chrome.runtime.lastError) {
-          setStatus(`获取链接失败: ${chrome.runtime.lastError.message}`);
-          setIsError(true);
-          return;
-        }
-        const links: FoundLink[] = response?.links || [];
-        setFoundLinks(links);
-      });
-    });
+      const response = (await chrome.runtime.sendMessage({
+        type: 'GET_FOUND_LINKS',
+        tabId: tab?.id,
+      })) as { links?: FoundLink[] } | undefined;
+      setFoundLinks(response?.links || []);
+    } catch (err) {
+      setStatus(`获取页面失败: ${getErrorMessage(err)}`);
+      setIsError(true);
+    }
   };
 
   useEffect(() => {

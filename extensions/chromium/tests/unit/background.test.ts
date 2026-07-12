@@ -46,6 +46,13 @@ interface MockChrome {
     removeAll: Mock<(callback?: () => void) => void>;
     onClicked: MockEvent;
   };
+  tabs: {
+    onRemoved: MockEvent;
+    onUpdated: MockEvent;
+  };
+  notifications: {
+    create: Mock<(options: unknown) => Promise<string>>;
+  };
 }
 
 describe('background helpers', () => {
@@ -89,6 +96,13 @@ describe('background message handlers', () => {
         create: vi.fn(),
         removeAll: vi.fn((callback?: () => void) => callback && callback()),
         onClicked: createMockEvent(),
+      },
+      tabs: {
+        onRemoved: createMockEvent(),
+        onUpdated: createMockEvent(),
+      },
+      notifications: {
+        create: vi.fn(async () => 'notification-id'),
       },
     };
 
@@ -293,5 +307,141 @@ describe('background message handlers', () => {
     mockChrome.runtime.onInstalled.dispatch();
     expect(mockChrome.contextMenus.removeAll).toHaveBeenCalled();
     expect(mockChrome.contextMenus.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('stores FOUND_LINKS per tab and serves them by tabId', async () => {
+    const linksTab1: FoundLink[] = [{ url: 'https://example.com/tab1', platform: 'test' }];
+    const linksTab2: FoundLink[] = [{ url: 'https://example.com/tab2', platform: 'test' }];
+
+    const response1 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links: linksTab1 },
+      { tab: { id: 1 } },
+      response1
+    );
+    await vi.waitFor(() => expect(response1).toHaveBeenCalled());
+
+    const response2 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links: linksTab2 },
+      { tab: { id: 2 } },
+      response2
+    );
+    await vi.waitFor(() => expect(response2).toHaveBeenCalled());
+
+    const getTab1 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
+    await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
+    expect(getTab1).toHaveBeenCalledWith({ links: linksTab1 });
+
+    const getTab2 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 2 }, {}, getTab2);
+    await vi.waitFor(() => expect(getTab2).toHaveBeenCalled());
+    expect(getTab2).toHaveBeenCalledWith({ links: linksTab2 });
+  });
+
+  it('clears per-tab links when the tab navigates', async () => {
+    const links: FoundLink[] = [{ url: 'https://example.com/tab1', platform: 'test' }];
+    const response = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links },
+      { tab: { id: 1 } },
+      response
+    );
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+
+    mockChrome.tabs.onUpdated.dispatch(1, { url: 'https://other.example/' });
+
+    const getTab1 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
+    await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
+    // Falls back to the legacy flat key once the per-tab entry is cleared.
+    expect(getTab1).toHaveBeenCalledWith({ links });
+  });
+
+  it('removes per-tab links when the tab is closed', async () => {
+    const links: FoundLink[] = [{ url: 'https://example.com/tab1', platform: 'test' }];
+    const response = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links },
+      { tab: { id: 1 } },
+      response
+    );
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+
+    mockChrome.tabs.onRemoved.dispatch(1);
+
+    const getTab1 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
+    await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
+    expect(getTab1).toHaveBeenCalledWith({ links });
+  });
+
+  it('fetches AI subtitle files without credentials', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ body: [] }),
+    } as Response);
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FETCH_JSON', url: 'https://aisubtitle.hdslb.com/bfs/ai_subtitle/sub.json' },
+      {},
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, data: { body: [] } });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://aisubtitle.hdslb.com/bfs/ai_subtitle/sub.json',
+      expect.objectContaining({ credentials: 'omit' })
+    );
+  });
+
+  it('notifies the user after a context menu archive succeeds', async () => {
+    const port = createMockPort();
+    mockChrome.runtime.connectNative.mockReturnValue(port);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ task_id: 'ctx-1', url: 'https://example.com' }),
+    } as Response);
+
+    mockChrome.contextMenus.onClicked.dispatch({
+      menuItemId: 'archive-current-page',
+      pageUrl: 'https://example.com',
+    } as chrome.contextMenus.OnClickData);
+    (port.onDisconnect as unknown as MockEvent).dispatch();
+
+    await vi.waitFor(() => expect(mockChrome.notifications.create).toHaveBeenCalled());
+    expect(mockChrome.notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'basic',
+        iconUrl: 'icon.png',
+        title: 'AIPulse',
+        message: '已归档到 AIPulse',
+      })
+    );
+  });
+
+  it('notifies the user when a context menu archive fails', async () => {
+    const port = createMockPort();
+    mockChrome.runtime.connectNative.mockReturnValue(port);
+    vi.mocked(fetch).mockRejectedValue(new Error('connection refused'));
+
+    mockChrome.contextMenus.onClicked.dispatch({
+      menuItemId: 'archive-current-page',
+      pageUrl: 'https://example.com',
+    } as chrome.contextMenus.OnClickData);
+    (port.onDisconnect as unknown as MockEvent).dispatch();
+
+    await vi.waitFor(() => expect(mockChrome.notifications.create).toHaveBeenCalled());
+    expect(mockChrome.notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'AIPulse',
+        message: expect.stringContaining('归档失败'),
+      })
+    );
   });
 });
