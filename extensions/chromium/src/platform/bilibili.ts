@@ -10,6 +10,17 @@ function extractBvid(url: string): string | undefined {
   return match ? match[1] : undefined;
 }
 
+function isBilibiliNonVideoPage(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const isBilibiliHost =
+      parsed.hostname === 'bilibili.com' || parsed.hostname.endsWith('.bilibili.com');
+    return isBilibiliHost && !parsed.pathname.startsWith('/video/');
+  } catch {
+    return false;
+  }
+}
+
 const PAGE_ID_TIMEOUT_MS = 3000;
 
 function extractBilibiliVideoIdsFromPage(): Promise<{ aid?: number; cid?: number }> {
@@ -77,6 +88,10 @@ async function fetchApiSubtitleOptions(bvid: string, cid?: number, aid?: number)
 }
 
 export async function extractBilibiliLinks(document: Document, url: string): Promise<FoundLink[]> {
+  if (isBilibiliNonVideoPage(url)) {
+    return [];
+  }
+
   const candidates = new Set<string>();
 
   const canonical = document.querySelector('link[rel="canonical"]');

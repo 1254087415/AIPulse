@@ -114,6 +114,18 @@ describe('extractBilibiliLinks', () => {
     expect(links).toHaveLength(0);
   });
 
+  it('skips extraction on bilibili non-video pages', async () => {
+    const doc = makeDoc(
+      '<html><body><a href="https://www.bilibili.com/video/BV1yy411c7m">Link</a></body></html>'
+    );
+    const homepage = await extractBilibiliLinks(doc, 'https://www.bilibili.com/');
+    expect(homepage).toHaveLength(0);
+    const channel = await extractBilibiliLinks(doc, 'https://www.bilibili.com/v/douga');
+    expect(channel).toHaveLength(0);
+    const space = await extractBilibiliLinks(doc, 'https://space.bilibili.com/12345');
+    expect(space).toHaveLength(0);
+  });
+
   it('uses inline subtitle options when __INITIAL_STATE__ has them', async () => {
     const doc = makeDoc(`
       <html><head>
