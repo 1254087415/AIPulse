@@ -12,6 +12,19 @@ export default defineConfig(({ mode }) => ({
       // ^ vite-plugin-web-extension fetches the manifest schema from SchemaStore on
       // every build; that endpoint rate-limits (429) and breaks CI. The local
       // manifest.json is still emitted and loaded by the browser.
+      transformManifest: (manifest) => {
+        // The E2E mock server on localhost:3456 must stay out of the production
+        // manifest; inject it only for e2e builds.
+        if (mode === 'e2e') {
+          const mockOrigin = 'http://localhost:3456/*';
+          manifest.host_permissions = [...(manifest.host_permissions ?? []), mockOrigin];
+          manifest.content_scripts = (manifest.content_scripts ?? []).map((script) => ({
+            ...script,
+            matches: [...(script.matches ?? []), mockOrigin],
+          }));
+        }
+        return manifest;
+      },
     }),
   ],
   define: {

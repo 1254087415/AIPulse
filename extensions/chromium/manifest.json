@@ -8,6 +8,7 @@
     "scripting",
     "contextMenus",
     "nativeMessaging",
+    "notifications",
     "storage",
     "tabs"
   ],
@@ -23,20 +24,19 @@
     "https://xhslink.com/*",
     "https://mp.weixin.qq.com/*",
     "https://www.youtube.com/*",
-    "https://youtu.be/*",
-    "http://localhost:3456/*"
+    "https://youtu.be/*"
   ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icon.png",
-      "48": "icon.png",
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
       "128": "icon.png"
     }
   },
   "icons": {
-    "16": "icon.png",
-    "48": "icon.png",
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
     "128": "icon.png"
   },
   "background": {
@@ -53,8 +53,7 @@
         "https://xhslink.com/*",
         "https://mp.weixin.qq.com/*",
         "https://www.youtube.com/*",
-        "https://youtu.be/*",
-        "http://localhost:3456/*"
+        "https://youtu.be/*"
       ],
       "js": ["src/content.ts"],
       "run_at": "document_idle"
