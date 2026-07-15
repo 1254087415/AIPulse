@@ -48,7 +48,7 @@ describe('apiFetch', () => {
       vi.fn(async () => new Response('Not Found', { status: 404, statusText: 'Not Found' })),
     )
 
-    await expect(apiFetch('/missing')).rejects.toThrow('API request failed: Not Found')
+    await expect(apiFetch('/missing')).rejects.toThrow('请求失败，请稍后重试')
     await expect(apiFetch('/missing')).rejects.toSatisfy((error: unknown) => {
       if (!(error instanceof ApiError)) return false
       return error.status === 404
@@ -76,7 +76,7 @@ describe('apiFetch', () => {
       vi.fn(async () => new Response(JSON.stringify({ success: false }), { status: 200 })),
     )
 
-    await expect(apiFetch('/submit')).rejects.toThrow('API error')
+    await expect(apiFetch('/submit')).rejects.toThrow('请求失败，请稍后重试')
   })
 
   it('throws when response body is not valid JSON', async () => {
