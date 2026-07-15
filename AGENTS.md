@@ -1,4 +1,4 @@
-# AIPulse — Claude 项目指令
+# AIPulse — Agent 项目指令
 
 > **同步约束**：`AGENTS.md` 与 `CLAUDE.md` 内容必须保持一致——修改其中任何一个，必须同步更新另一个。
 

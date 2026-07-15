@@ -1,74 +1,174 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import type { Hotspot } from '../../types'
-
-function formatDate(value: string | null): string {
-  if (!value) return ''
-  return new Date(value).toLocaleString('zh-CN')
-}
+import { formatDateTime } from '../../lib/format'
+import { isSafeUrl } from '../../lib/url'
 
 const props = defineProps<{ hotspot: Hotspot }>()
+const barWidth = `${Math.min(100, (props.hotspot.heat_score || 0) * 10)}%`
+const safeUrl = computed(() => (isSafeUrl(props.hotspot.url) ? props.hotspot.url : null))
 </script>
 
 <template>
-  <article class="card">
-    <div class="header">
-      <a :href="props.hotspot.url" target="_blank" rel="noopener noreferrer" class="title">
+  <article class="reading panel">
+    <div class="reading-body">
+      <RouterLink
+        :to="`/hotspot/${props.hotspot.id}`"
+        class="reading-title"
+      >
         {{ props.hotspot.title }}
-      </a>
-      <span class="score">{{ props.hotspot.heat_score.toFixed(1) }}</span>
+      </RouterLink>
+      <p v-if="props.hotspot.summary" class="reading-summary">
+        {{ props.hotspot.summary }}
+      </p>
+      <div class="reading-meta">
+        <span class="tag">{{ props.hotspot.source_type }}</span>
+        <span v-if="props.hotspot.category" class="tag">{{ props.hotspot.category }}</span>
+        <span class="tag" :class="{ 'tag-signal': props.hotspot.importance === 'high' }">
+          {{ props.hotspot.importance }}
+        </span>
+        <time v-if="props.hotspot.published_at" class="mono slate">{{ formatDateTime(props.hotspot.published_at) }}</time>
+        <a
+          v-if="safeUrl"
+          :href="safeUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="external"
+          @click.stop
+        >
+          原文 →
+        </a>
+        <span v-else class="external disabled">原文不可用</span>
+      </div>
     </div>
-    <p v-if="props.hotspot.summary" class="summary">{{ props.hotspot.summary }}</p>
-
-    <div class="meta">
-      <span class="source">{{ props.hotspot.source_type }}</span>
-      <span v-if="props.hotspot.category" class="category">{{ props.hotspot.category }}</span>
-      <span class="importance">{{ props.hotspot.importance }}</span>
-      <span v-if="props.hotspot.published_at" class="date">{{ formatDate(props.hotspot.published_at) }}</span>
+    <div class="reading-score" aria-label="热度分数">
+      <span class="score-value">{{ props.hotspot.heat_score.toFixed(1) }}</span>
+      <span class="score-bar" aria-hidden="true"><i :style="{ width: barWidth }"></i></span>
     </div>
   </article>
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  padding: 1rem;
-  margin-bottom: 0.75rem;
-  background: #ffffff;
-}
-.header {
+.reading {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
-  gap: 1rem;
+  justify-content: space-between;
+  gap: 16px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.title {
+
+.reading:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--grid);
+}
+
+.reading-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.reading-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 17px;
   font-weight: 600;
-  color: #111827;
-  text-decoration: none;
+  line-height: 1.35;
+  color: var(--ink);
+  margin-bottom: 6px;
 }
-.title:hover {
-  text-decoration: underline;
+
+.reading-title:hover {
+  color: var(--signal);
 }
-.score {
-  flex-shrink: 0;
-  font-weight: 700;
-  color: #dc2626;
+
+.reading-summary {
+  font-size: 14px;
+  color: var(--slate);
+  line-height: 1.55;
+  margin: 0 0 10px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.summary {
-  color: #4b5563;
-  margin: 0.5rem 0 0;
-  font-size: 0.875rem;
-}
-.meta {
-  margin-top: 0.75rem;
+
+.reading-meta {
   display: flex;
-  gap: 0.75rem;
-  font-size: 0.75rem;
-  color: #6b7280;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
 }
-.source, .category, .importance {
-  text-transform: uppercase;
-  letter-spacing: 0.025em;
+
+.reading-meta time {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.external {
+  font-size: 11px;
+  color: var(--signal);
+  margin-left: auto;
+}
+
+.external.disabled {
+  color: var(--slate);
+  cursor: not-allowed;
+}
+
+.reading-score {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 56px;
+}
+
+.score-value {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--signal);
+}
+
+.score-bar {
+  display: block;
+  width: 56px;
+  height: 3px;
+  background: var(--mist);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.score-bar i {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+  border-radius: 2px;
+}
+
+@media (max-width: 640px) {
+  .reading {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .reading-score {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+  }
+
+  .score-bar {
+    flex: 1;
+  }
+
+  .external {
+    margin-left: 0;
+  }
 }
 </style>

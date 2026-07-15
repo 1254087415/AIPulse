@@ -1,0 +1,335 @@
+:root {
+  /* 心电图纸 / 监测仪主题 */
+  --paper: #fcfaf8;
+  --grid: #f2dadc;
+  --ink: #1b1a17;
+  --ink-rgb: 27, 26, 23;
+  --slate: #7a756c;
+  --mist: #e8e2d8;
+  --signal: #d93025;
+  --signal-rgb: 217, 48, 37;
+  --signal-soft: #fdecec;
+
+  --font-display: 'Space Grotesk', -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-body: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --shadow-sm: 0 1px 2px rgba(var(--ink-rgb), 0.04);
+  --shadow-md: 0 4px 12px rgba(var(--ink-rgb), 0.06);
+}
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  z-index: 100;
+  padding: 8px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 14px;
+  text-decoration: none;
+  border-radius: 0 0 var(--radius-sm) 0;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background-color: var(--paper);
+  /* 淡粉色 ECG 网格 */
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: center top;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+/* 基础排版 */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* 页面容器 */
+.page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--mist);
+}
+
+.page-title h1 {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.page-title .subtitle {
+  font-size: 14px;
+  color: var(--slate);
+  margin-top: 4px;
+}
+
+/* 数据读数 */
+.readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+
+.readout-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--signal);
+  line-height: 1;
+}
+
+.readout-label {
+  font-size: 12px;
+  color: var(--slate);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* 通用面板 / 卡片 */
+.panel {
+  background: rgba(252, 250, 248, 0.92);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(2px);
+}
+
+/* 状态提示 */
+.state {
+  border-radius: var(--radius-md);
+  padding: 16px;
+  font-size: 14px;
+}
+
+.state-empty {
+  background: rgba(252, 250, 248, 0.92);
+  border: 1px dashed var(--mist);
+  color: var(--slate);
+  text-align: center;
+}
+
+.state-error {
+  background: var(--signal-soft);
+  border: 1px solid rgba(var(--signal-rgb), 0.16);
+  color: var(--signal);
+}
+
+.state-success {
+  background: rgba(22, 163, 74, 0.08);
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  color: #166534;
+}
+
+.state-loading {
+  color: var(--slate);
+}
+
+/* 控件 */
+.input {
+  appearance: none;
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
+  background: rgba(252, 250, 248, 0.92);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input:focus-visible {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px rgba(var(--signal-rgb), 0.08);
+}
+
+.input::placeholder {
+  color: var(--slate);
+}
+
+.btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--paper);
+  transition: transform 0.1s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--signal-rgb), 0.25);
+}
+
+.btn:hover:not(:disabled) {
+  background: #2e2d29;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--mist);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(var(--ink-rgb), 0.04);
+}
+
+.btn-ghost:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--signal-rgb), 0.12);
+}
+
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--signal-rgb), 0.18);
+  border-radius: var(--radius-sm);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.nav-link:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 2px rgba(var(--signal-rgb), 0.18);
+}
+
+/* 标签 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(var(--ink-rgb), 0.05);
+  color: var(--slate);
+  white-space: nowrap;
+}
+
+.tag-signal {
+  background: var(--signal-soft);
+  color: var(--signal);
+}
+
+/* 辅助 */
+.mono {
+  font-family: var(--font-mono);
+}
+
+.slate {
+  color: var(--slate);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 16px 14px 60px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .readout-value {
+    font-size: 26px;
+  }
+}
