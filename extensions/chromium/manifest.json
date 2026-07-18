@@ -1,38 +1,42 @@
 {
   "manifest_version": 3,
   "name": "AIPulse Clipper",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "一键提取网页视频/文章链接到 AIPulse 知识库",
   "permissions": [
     "activeTab",
     "scripting",
     "contextMenus",
     "nativeMessaging",
+    "notifications",
     "storage",
     "tabs"
   ],
   "host_permissions": [
     "https://www.bilibili.com/*",
     "https://b23.tv/*",
+    "https://api.bilibili.com/*",
+    "https://*.hdslb.com/*",
+    "https://aisubtitle.hdslb.com/*",
+    "https://*.bilivideo.com/*",
     "https://www.douyin.com/*",
     "https://www.xiaohongshu.com/*",
     "https://xhslink.com/*",
     "https://mp.weixin.qq.com/*",
     "https://www.youtube.com/*",
-    "https://youtu.be/*",
-    "http://localhost:3456/*"
+    "https://youtu.be/*"
   ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icon.png",
-      "48": "icon.png",
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
       "128": "icon.png"
     }
   },
   "icons": {
-    "16": "icon.png",
-    "48": "icon.png",
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
     "128": "icon.png"
   },
   "background": {
@@ -49,11 +53,16 @@
         "https://xhslink.com/*",
         "https://mp.weixin.qq.com/*",
         "https://www.youtube.com/*",
-        "https://youtu.be/*",
-        "http://localhost:3456/*"
+        "https://youtu.be/*"
       ],
       "js": ["src/content.ts"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.douyin.com/*"],
+      "js": ["src/platform/douyin-share-main.ts"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ]
 }

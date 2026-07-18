@@ -17,6 +17,7 @@ _SECRET_KEYS = {
     "feishu_secret",
     "wechat_appsecret",
     "wechat_bot_token",
+    "aipulse_api_token",
 }
 
 
@@ -81,6 +82,9 @@ class AppSettings(BaseSettings):
 
     # Logging
     log_level: str = "INFO"
+
+    # API auth
+    aipulse_api_token: SecretStr = Field(default=SecretStr(""))
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure data directories exist after initialization."""

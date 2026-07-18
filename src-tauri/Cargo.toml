@@ -27,3 +27,6 @@ tauri = { version = "2.11.3", features = ["tray-icon", "test"] }
 tauri-plugin-log = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
+
+[dev-dependencies]
+tauri = { version = "2.11.3", features = ["test"] }

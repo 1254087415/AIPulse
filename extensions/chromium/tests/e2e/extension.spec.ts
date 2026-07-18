@@ -1,45 +1,22 @@
 import { chromium, expect, test } from '@playwright/test';
 import fs from 'fs';
-import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { startRealBackend, type RealBackend } from './helpers/real-backend';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
 const FIXTURES_DIR = path.resolve(__dirname, './fixtures');
-const MOCK_PORT = 3456;
+const BACKEND_PORT = 3456;
 
 test.describe('AIPulse Clipper E2E', () => {
-  let server: http.Server;
-  let lastSubmission: { url: string; source: string; mode: string } | null = null;
+  let backend: RealBackend;
 
   test.beforeAll(async () => {
-    server = http.createServer((req, res) => {
-      const url = new URL(req.url ?? '/', `http://localhost:${MOCK_PORT}`);
-
-      if (url.pathname === '/api/videos/extract' && req.method === 'POST') {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk;
-        });
-        req.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            lastSubmission = {
-              url: parsed.url,
-              source: parsed.source,
-              mode: parsed.mode,
-            };
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ task_id: 'e2e-task-123', url: parsed.url }));
-          } catch {
-            res.writeHead(400);
-            res.end('bad request');
-          }
-        });
-        return;
-      }
-
+    // Real Python sidecar + HTTP bridge. Fixture pages are served by the
+    // fallback handler; submissions go to the real sidecar's submit_url.
+    backend = await startRealBackend(BACKEND_PORT, (req, res) => {
+      const url = new URL(req.url ?? '/', `http://localhost:${BACKEND_PORT}`);
       const filePath = path.resolve(
         FIXTURES_DIR,
         url.pathname === '/' ? 'bilibili.html' : url.pathname.replace(/^\//, '')
@@ -61,16 +38,14 @@ test.describe('AIPulse Clipper E2E', () => {
         res.end(data);
       });
     });
-
-    await new Promise<void>((resolve) => server.listen(MOCK_PORT, resolve));
   });
 
   test.afterAll(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await backend.close();
   });
 
-  test('detects links on each platform fixture and submits via HTTP fallback', async () => {
+  test('detects links on each platform fixture and submits to the real sidecar', async () => {
+    test.setTimeout(480_000);
     const userDataDir = path.join(__dirname, '../.tmp/user-data');
     fs.mkdirSync(userDataDir, { recursive: true });
 
@@ -95,7 +70,7 @@ test.describe('AIPulse Clipper E2E', () => {
     const extId = serviceWorker.url().split('/')[2];
     expect(extId).toBeTruthy();
 
-    // Point HTTP fallback at the mock server.
+    // Point HTTP fallback at the real backend bridge.
     await serviceWorker.evaluate(
       (port) =>
         new Promise<void>((resolve) => {
@@ -104,23 +79,31 @@ test.describe('AIPulse Clipper E2E', () => {
             () => resolve()
           );
         }),
-      MOCK_PORT
+      BACKEND_PORT
     );
 
     await warmupPage.close();
 
+    // Order matters: the real sidecar's pipeline blocks its JSON-RPC loop while
+    // a download runs, so subsequent submissions stall until the previous
+    // pipeline finishes. Cases with URLs whose pipelines fail fast (stale ids,
+    // 404s) go first; the real, downloadable Bilibili video goes last so its
+    // long-running download blocks nothing.
     const cases = [
-      { page: 'bilibili.html', expectedUrl: 'https://www.bilibili.com/video/BV1xx411c7mD' },
-      { page: 'douyin.html', expectedUrl: 'https://www.douyin.com/video/1234567890' },
-      { page: 'xiaohongshu.html', expectedUrl: 'https://www.xiaohongshu.com/explore/abc123' },
       { page: 'wechat.html', expectedUrl: 'https://mp.weixin.qq.com/s/abcdef' },
+      { page: 'xiaohongshu.html', expectedUrl: 'https://www.xiaohongshu.com/discovery/item/647b0af200000000130034f9' },
+      { page: 'douyin.html', expectedUrl: 'https://www.douyin.com/video/1234567890' },
+      { page: 'bilibili.html', expectedUrl: 'https://www.bilibili.com/video/BV1xx411c7mD' },
     ];
 
     for (const { page: fixture, expectedUrl } of cases) {
-      lastSubmission = null;
+      const countBefore = backend.getSubmissionCount();
+      console.log(`[case] ${fixture} start, countBefore=${countBefore}`);
       await serviceWorker.evaluate(() => chrome.action.setBadgeText({ text: '' }));
       const page = await context.newPage();
-      await page.goto(`http://localhost:${MOCK_PORT}/${fixture}`);
+      page.on('console', (msg) => console.log(`[case] PAGE CONSOLE: ${msg.text()}`));
+      page.on('pageerror', (err) => console.log(`[case] PAGE ERROR: ${err.message}`));
+      await page.goto(`http://localhost:${BACKEND_PORT}/${fixture}`);
       await page.waitForLoadState('networkidle');
 
       await expect
@@ -137,12 +120,26 @@ test.describe('AIPulse Clipper E2E', () => {
         },
         { expectedUrl }
       );
+      console.log(`[case] ${fixture} dispatched submit for ${expectedUrl}`);
 
-      await expect.poll(() => lastSubmission).not.toBeNull();
-      const submission = lastSubmission!;
-      expect(submission.url).toBe(expectedUrl);
-      expect(submission.source).toBe('browser_extension');
-      expect(submission.mode).toBe('archive');
+      // Wait for THIS submission to reach the real sidecar. The sidecar may be
+      // busy with the previous case's pipeline (see ordering note above).
+      await expect
+        .poll(() => backend.getSubmissionCount(), { timeout: 90_000 })
+        .toBe(countBefore + 1);
+      const taskId = backend.getSubmittedTaskId();
+      expect(taskId, 'real sidecar should assign a task id').toMatch(/^[a-f0-9]{12}$/);
+
+      const submitBody = backend.getLastSubmitBody();
+      expect(submitBody).not.toBeNull();
+      expect(submitBody!.url).toBe(expectedUrl);
+      expect(submitBody!.source).toBe('browser_extension');
+      expect(submitBody!.mode).toBe('archive');
+
+      const status = await backend.client.request('get_task_status', {
+        task_id: taskId,
+      });
+      expect(status.error, `get_task_status failed: ${JSON.stringify(status.error)}`).toBeUndefined();
 
       await page.close();
     }

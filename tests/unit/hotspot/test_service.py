@@ -9,9 +9,16 @@ from aipulse.hotspot import service as hotspot_service
 from aipulse.hotspot.models import Hotspot, Keyword, Source
 from aipulse.hotspot.service import (
     create_keyword,
+    delete_keyword,
+    generate_digest,
     get_hotspot,
+    get_related_hotspots,
     list_hotspots,
+    list_keywords,
+    list_sources,
     process_candidates,
+    update_keyword,
+    update_source,
 )
 from aipulse.hotspot.summarizer import HotspotAnalysis
 
@@ -240,3 +247,101 @@ async def test_process_candidates_calculates_heat_score(
     assert count == 1
     hotspots = (await db_session.execute(select(Hotspot))).scalars().all()
     assert hotspots[0].heat_score > 200
+
+
+@pytest.mark.integration
+async def test_list_keywords(db_session):
+    await create_keyword(db_session, "LLM")
+    await create_keyword(db_session, "Agent")
+    keywords = await list_keywords(db_session)
+    assert len(keywords) == 2
+    assert keywords[0].value == "Agent"
+
+
+@pytest.mark.integration
+async def test_update_keyword(db_session):
+    keyword = await create_keyword(db_session, "LLM")
+    updated = await update_keyword(db_session, keyword.id, {"notify_on_match": True})
+    assert updated is not None
+    assert updated.notify_on_match is True
+
+
+@pytest.mark.integration
+async def test_delete_keyword(db_session):
+    keyword = await create_keyword(db_session, "LLM")
+    assert await delete_keyword(db_session, keyword.id) is True
+    assert await delete_keyword(db_session, keyword.id) is False
+
+
+@pytest.mark.integration
+async def test_list_sources(db_session, source_data):
+    source = Source(**source_data)
+    db_session.add(source)
+    await db_session.commit()
+    sources = await list_sources(db_session)
+    assert len(sources) == 1
+    assert sources[0].name == "Test Source"
+
+
+@pytest.mark.integration
+async def test_update_source(db_session, source_data):
+    source = Source(**source_data)
+    db_session.add(source)
+    await db_session.commit()
+    updated = await update_source(
+        db_session, source.id, {"is_active": False, "default_weight": 2.5}
+    )
+    assert updated is not None
+    assert updated.is_active is False
+    assert updated.default_weight == 2.5
+
+
+@pytest.mark.integration
+async def test_generate_digest(db_session, source):
+    for index in range(3):
+        db_session.add(
+            Hotspot(
+                title=f"AI news {index}",
+                url=f"https://example.com/{index}",
+                canonical_url=f"https://example.com/{index}",
+                source_id=source.id,
+                source_type="rss_news",
+                heat_score=float(index * 10),
+            )
+        )
+    await db_session.commit()
+
+    digest = await generate_digest(db_session)
+    assert digest.title.startswith("AIPulse AI 热点日报")
+    assert "AI news" in digest.content
+    assert len(digest.top_hotspot_ids or []) == 3
+
+
+@pytest.mark.integration
+async def test_get_related_hotspots(db_session, source):
+    h1 = Hotspot(
+        id="h1",
+        title="AI news 1",
+        url="https://example.com/1",
+        canonical_url="https://example.com/1",
+        source_id=source.id,
+        source_type="rss_news",
+        category="ai-products",
+        heat_score=50,
+    )
+    h2 = Hotspot(
+        id="h2",
+        title="AI news 2",
+        url="https://example.com/2",
+        canonical_url="https://example.com/2",
+        source_id=source.id,
+        source_type="rss_news",
+        category="ai-products",
+        heat_score=30,
+    )
+    db_session.add_all([h1, h2])
+    await db_session.commit()
+
+    related = await get_related_hotspots(db_session, "h1")
+    assert len(related) == 1
+    assert related[0].id == "h2"

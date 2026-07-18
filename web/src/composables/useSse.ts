@@ -1,19 +1,19 @@
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, readonly, ref, type Ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { API_BASE } from '../api/client'
+import { createUseSseController, type SseStatus } from './useSseHelpers'
 
-export function useSse(path: string) {
+export function useSse(path: string): { status: Readonly<Ref<SseStatus>> } {
   const queryClient = useQueryClient()
-  let eventSource: EventSource | null = null
+  const status = ref<SseStatus>('connecting')
 
-  onMounted(() => {
-    eventSource = new EventSource(`${API_BASE}${path}`)
-    eventSource.addEventListener('hotspot.new', () => {
-      queryClient.invalidateQueries({ queryKey: ['hotspots'], exact: false })
-    })
+  const controller = createUseSseController({
+    path,
+    status,
+    invalidateQueries: (options) => queryClient.invalidateQueries(options),
   })
 
-  onUnmounted(() => {
-    eventSource?.close()
-  })
+  onMounted(() => controller.start())
+  onUnmounted(() => controller.stop())
+
+  return { status: readonly(status) }
 }

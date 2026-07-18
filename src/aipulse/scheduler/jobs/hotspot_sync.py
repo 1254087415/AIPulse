@@ -7,10 +7,44 @@ from sqlalchemy import select
 
 from aipulse.collectors.registry import get_collector
 from aipulse.hotspot.models import Source
-from aipulse.hotspot.service import process_candidates
+from aipulse.hotspot.service import process_candidates, sanitize_error_message
 from aipulse.store.database import get_session_maker
 
 logger = logging.getLogger(__name__)
+
+
+async def sync_source_by_id(source_id: str) -> int:
+    """Fetch and process a single source by id."""
+    processed = 0
+    async with get_session_maker()() as session:
+        source = await session.get(Source, source_id)
+        if source is None:
+            logger.warning("Source %s not found for sync", source_id)
+            return 0
+        collector = None
+        try:
+            collector_cls = get_collector(source.source_type)
+            collector = collector_cls.from_source(source)
+            raw_items = await collector.fetch()
+            candidates = [collector.normalize(item) for item in raw_items]
+            processed = await process_candidates(session, candidates, source)
+            source.last_fetched_at = datetime.now(UTC)
+            source.last_error = None
+            source.failed_at = None
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            logger.exception("Failed to sync source %s (%s)", source.id, source.name)
+            source.last_error = sanitize_error_message(str(exc))
+            source.failed_at = datetime.now(UTC)
+            try:
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to persist source error for %s", source.id)
+        finally:
+            if collector is not None:
+                await collector.close()
+    return processed
 
 
 async def sync_all_sources() -> int:
@@ -36,7 +70,7 @@ async def sync_all_sources() -> int:
             except Exception as exc:  # noqa: BLE001
                 await session.rollback()
                 logger.exception("Failed to sync source %s (%s)", source.id, source.name)
-                source.last_error = str(exc)
+                source.last_error = sanitize_error_message(str(exc))
                 source.failed_at = datetime.now(UTC)
                 try:
                     await session.commit()

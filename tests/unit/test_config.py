@@ -35,11 +35,21 @@ def test_public_dict_masks_secrets(settings: AppSettings) -> None:
 
 @pytest.mark.unit
 def test_save_persists_non_secret_overrides(settings: AppSettings) -> None:
-    settings = settings.update(llm_model="kimi-latest")
+    settings = settings.update(
+        llm_model="kimi-latest", llm_api_key="sk-secret-value"
+    )
     settings.save()
     persisted = json.loads(settings.settings_path.read_text(encoding="utf-8"))
     assert persisted["llm_model"] == "kimi-latest"
     assert "llm_api_key" not in persisted
+
+
+@pytest.mark.unit
+def test_client_dict_returns_real_secret_values(settings: AppSettings) -> None:
+    settings = settings.update(llm_api_key="sk-secret-value")
+    client = settings.to_client_dict()
+    assert client["llm_api_key"] == "sk-secret-value"
+    assert client["llm_base_url"] == "https://api.kimi.com/coding/v1"
 
 
 @pytest.mark.unit
