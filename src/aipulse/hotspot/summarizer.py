@@ -28,12 +28,43 @@ async def analyze_hotspot(
     content: str,
     adapter: Any | None = None,
 ) -> HotspotAnalysis:
-    """Analyze hotspot content using an LLM adapter."""
-    adapter = adapter or OpenAICompatibleAdapter(get_settings())
+    """Analyze hotspot content using an LLM adapter.
+
+    Falls back to a simple heuristic when no LLM API key is configured so that
+    the hotspot stream still works in development or offline setups.
+    """
+    if adapter is None:
+        settings = get_settings()
+        api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+        if not api_key:
+            logger.warning("No LLM API key configured; using heuristic analysis")
+            return _heuristic_analysis(keyword, content)
+        adapter = OpenAICompatibleAdapter(settings)
+
     prompt = _build_prompt(keyword, content)
     response = await adapter.complete(prompt)
     data = _parse_analysis(response)
     return HotspotAnalysis(**data)
+
+
+def _heuristic_analysis(keyword: str, content: str) -> HotspotAnalysis:
+    """Rule-based analysis used when no LLM is available.
+
+    Treats all non-empty items as real with medium importance so the stream
+    remains populated. Keyword matches increase relevance.
+    """
+    text = (content or "").lower()
+    keyword_lower = (keyword or "").lower()
+    relevance = 70
+    if keyword_lower and keyword_lower in text:
+        relevance = 85
+    return HotspotAnalysis(
+        is_real=True,
+        relevance=relevance,
+        importance="medium",
+        summary=(content or "")[:120],
+        category="industry",
+    )
 
 
 def _build_prompt(keyword: str, content: str) -> str:

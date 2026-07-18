@@ -78,11 +78,14 @@ def calculate_heat_score(
     )
     keyword_score = len(keyword_matches) * KEYWORD_MATCH_SCORE
     multi_source_score = min(source_count, MULTI_SOURCE_CAP) * MULTI_SOURCE_SCORE
-    hours = (
-        max((now_utc() - published_at).total_seconds() / 3600, 0)
-        if published_at
-        else FALLBACK_AGE_HOURS
-    )
+    if published_at is None:
+        hours = FALLBACK_AGE_HOURS
+    else:
+        # Allow naive datetimes by treating them as UTC.
+        reference = published_at
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=UTC)
+        hours = max((now_utc() - reference).total_seconds() / 3600, 0)
     freshness_score = FRESHNESS_MAX_SCORE * math.exp(-FRESHNESS_HALF_LIFE_HOURS * hours)
     return source_weight * (
         interaction_score + keyword_score + multi_source_score + freshness_score + quality_score

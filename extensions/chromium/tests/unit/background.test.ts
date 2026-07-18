@@ -351,11 +351,31 @@ describe('background message handlers', () => {
     await vi.waitFor(() => expect(response).toHaveBeenCalled());
 
     mockChrome.tabs.onUpdated.dispatch(1, { url: 'https://other.example/' });
+    // Let the fire-and-forget clear settle before querying.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const getTab1 = vi.fn();
     mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
     await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
-    // Falls back to the legacy flat key once the per-tab entry is cleared.
+    expect(getTab1).toHaveBeenCalledWith({ links: [] });
+  });
+
+  it('keeps per-tab links on same-page query changes', async () => {
+    const links: FoundLink[] = [{ url: 'https://example.com/video/1', platform: 'test' }];
+    const response = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links },
+      { tab: { id: 1, url: 'https://example.com/video/1' } },
+      response
+    );
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+
+    // Bilibili-style playback-position update: same path, different query.
+    mockChrome.tabs.onUpdated.dispatch(1, { url: 'https://example.com/video/1?t=123' });
+
+    const getTab1 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
+    await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
     expect(getTab1).toHaveBeenCalledWith({ links });
   });
 
@@ -370,11 +390,13 @@ describe('background message handlers', () => {
     await vi.waitFor(() => expect(response).toHaveBeenCalled());
 
     mockChrome.tabs.onRemoved.dispatch(1);
+    // Let the fire-and-forget clear settle before querying.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const getTab1 = vi.fn();
     mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
     await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
-    expect(getTab1).toHaveBeenCalledWith({ links });
+    expect(getTab1).toHaveBeenCalledWith({ links: [] });
   });
 
   it('fetches AI subtitle files without credentials', async () => {
@@ -443,5 +465,176 @@ describe('background message handlers', () => {
         message: expect.stringContaining('归档失败'),
       })
     );
+  });
+
+  it('returns global cached links when GET_FOUND_LINKS has no tabId', async () => {
+    const links: FoundLink[] = [{ url: 'https://example.com/global', platform: 'test' }];
+    const setResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links },
+      { tab: { id: 5 } },
+      setResponse
+    );
+    await vi.waitFor(() => expect(setResponse).toHaveBeenCalled());
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS' }, {}, sendResponse);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ links });
+  });
+
+  it('stores FOUND_LINKS globally when sender has no tab info', async () => {
+    const links: FoundLink[] = [{ url: 'https://example.com/no-tab', platform: 'test' }];
+    const setResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'FOUND_LINKS', links }, {}, setResponse);
+    await vi.waitFor(() => expect(setResponse).toHaveBeenCalled());
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS' }, {}, sendResponse);
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ links });
+  });
+
+  it('rejects SUBMIT_URL with an invalid URL', async () => {
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'SUBMIT_URL', url: 'not-a-url', mode: 'archive' },
+      {},
+      sendResponse
+    );
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: 'invalid message' });
+  });
+
+  it('omits title and tags when they have invalid types in SUBMIT_URL', async () => {
+    const port = createMockPort();
+    mockChrome.runtime.connectNative.mockReturnValue(port);
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ task_id: 'http-types', url: 'https://example.com' }),
+    } as Response);
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      {
+        type: 'SUBMIT_URL',
+        url: 'https://example.com',
+        mode: 'archive',
+        title: true,
+        tags: ['ok', ''],
+      },
+      {},
+      sendResponse
+    );
+
+    (port.onDisconnect as unknown as MockEvent).dispatch();
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, result: expect.any(Object) });
+    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    expect(body.title).toBeUndefined();
+    expect(body.tags).toBeUndefined();
+  });
+
+  it('falls back to HTTP when native messaging host is unavailable', async () => {
+    mockChrome.runtime.connectNative.mockImplementation(() => {
+      throw new Error('host not found');
+    });
+    const httpResult: SubmitResult = {
+      task_id: 'http-native-fail',
+      url: 'https://example.com',
+    };
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => httpResult,
+    } as Response);
+
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'SUBMIT_URL', url: 'https://example.com', mode: 'archive' },
+      {},
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, result: httpResult });
+    expect(fetch).toHaveBeenCalled();
+  });
+
+  it('rejects FETCH_JSON for non-whitelisted domains', async () => {
+    const sendResponse = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FETCH_JSON', url: 'https://example.com/data.json' },
+      {},
+      sendResponse
+    );
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: 'host not allowed' });
+  });
+
+  it('ignores unknown context menu item ids', async () => {
+    mockChrome.contextMenus.onClicked.dispatch({
+      menuItemId: 'unknown',
+      pageUrl: 'https://example.com',
+    } as chrome.contextMenus.OnClickData);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockChrome.runtime.connectNative).not.toHaveBeenCalled();
+    expect(mockChrome.notifications.create).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when notification creation fails', async () => {
+    const port = createMockPort();
+    mockChrome.runtime.connectNative.mockReturnValue(port);
+    mockChrome.notifications.create.mockRejectedValue(new Error('notification failed'));
+
+    mockChrome.contextMenus.onClicked.dispatch({
+      menuItemId: 'archive-current-page',
+      pageUrl: 'https://example.com',
+    } as chrome.contextMenus.OnClickData);
+    (port.onMessage as unknown as MockEvent).dispatch({
+      result: { task_id: 'native-ctx', url: 'https://example.com' },
+    });
+
+    await vi.waitFor(() => expect(mockChrome.notifications.create).toHaveBeenCalled());
+    expect(mockChrome.notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'AIPulse',
+        message: '已归档到 AIPulse',
+      })
+    );
+  });
+
+  it('does nothing when tabs.onUpdated fires without a url change', async () => {
+    const links: FoundLink[] = [{ url: 'https://example.com/tab1', platform: 'test' }];
+    const response = vi.fn();
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'FOUND_LINKS', links },
+      { tab: { id: 1 } },
+      response
+    );
+    await vi.waitFor(() => expect(response).toHaveBeenCalled());
+
+    mockChrome.tabs.onUpdated.dispatch(1, { status: 'complete' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const getTab1 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 1 }, {}, getTab1);
+    await vi.waitFor(() => expect(getTab1).toHaveBeenCalled());
+    expect(getTab1).toHaveBeenCalledWith({ links });
+  });
+
+  it('does nothing when tabs.onRemoved fires for a tab without stored links', async () => {
+    mockChrome.tabs.onRemoved.dispatch(999);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const getTab999 = vi.fn();
+    mockChrome.runtime.onMessage.dispatch({ type: 'GET_FOUND_LINKS', tabId: 999 }, {}, getTab999);
+    await vi.waitFor(() => expect(getTab999).toHaveBeenCalled());
+    expect(getTab999).toHaveBeenCalledWith({ links: [] });
   });
 });

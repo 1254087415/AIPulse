@@ -200,6 +200,9 @@ skills-lock.json
 .playwright-mcp/
 .agnes/
 
+# Vite / Vitest caches
+.vite/
+
 # Temporary design screenshots and manual dev scripts
 web-*.png
 extensions/chromium/tests/manual/

@@ -24,6 +24,9 @@ export interface VideoMetadata {
   subtitleOptions: SubtitleOption[];
   subtitleEntries: SubtitleEntry[];
   selectedSubtitleLan: string;
+  // Douyin official share short link (https://v.douyin.com/xxx), preferred by
+  // the download pipeline when present.
+  shareUrl?: string;
 }
 
 export interface FoundLink {

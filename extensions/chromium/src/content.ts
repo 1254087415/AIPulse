@@ -1,4 +1,10 @@
 import { fetchSubtitleEntries, formatSubtitleEntries } from './platform/bilibili-subtitles';
+import { extractActiveFeedVideoId } from './platform/douyin';
+import {
+  extractDouyinVideoId,
+  installShareCapture,
+  requestShareUrlCapture,
+} from './platform/douyin-share';
 import { extractAllLinks } from './platform/registry';
 import type { SubmitMode, SubtitleEntry } from './types';
 import { cleanTrackingParams, dedupeLinks } from './utils';
@@ -40,6 +46,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     return true;
   }
+
+  if (message.type === 'FETCH_DOUYIN_SHARE_URL' && message.videoId) {
+    void (async () => {
+      try {
+        const shareUrl = await requestShareUrlCapture(document, String(message.videoId));
+        sendResponse({ ok: !!shareUrl, shareUrl });
+      } catch (error: unknown) {
+        sendResponse({
+          ok: false,
+          shareUrl: undefined,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'RESCAN') {
+    void (async () => {
+      try {
+        const links = await extractAllLinks(document, window.location.href);
+        const deduped = dedupeLinks(links);
+        chrome.runtime.sendMessage({ type: 'FOUND_LINKS', links: deduped }, () => {
+          void chrome.runtime.lastError;
+        });
+        sendResponse({ ok: true, links: deduped });
+      } catch (error: unknown) {
+        sendResponse({
+          ok: false,
+          links: [],
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+    return true;
+  }
+
   return false;
 });
 
@@ -66,20 +109,44 @@ if (__E2E__) {
   });
 }
 
+// Douyin's share short-link endpoint is protected by anti-bot signatures.
+// We install a main-world interceptor so that when the user (or we) hovers the
+// share button, the generated short link is captured and surfaced in the popup.
+if (window.location.href.includes('douyin.com')) {
+  installShareCapture(document);
+}
+
 let lastUrl = window.location.href;
+let lastActiveDouyinId = extractActiveFeedVideoId(document);
 let debounceTimer: number | null = null;
-const observer = new MutationObserver(() => {
-  if (window.location.href !== lastUrl) {
-    lastUrl = window.location.href;
-    if (debounceTimer) {
-      window.clearTimeout(debounceTimer);
-    }
-    debounceTimer = window.setTimeout(() => {
-      scanAndReport().catch((error: unknown) => {
-        // eslint-disable-next-line no-console
-        console.error('AIPulse: scan on navigation failed', error);
-      });
-    }, 500);
+
+function currentDouyinActiveId(): string | undefined {
+  if (!window.location.href.includes('douyin.com')) return undefined;
+  return extractActiveFeedVideoId(document);
+}
+
+function scheduleScan() {
+  if (debounceTimer) {
+    window.clearTimeout(debounceTimer);
   }
+  debounceTimer = window.setTimeout(() => {
+    scanAndReport().catch((error: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('AIPulse: scan failed', error);
+    });
+  }, 500);
+}
+
+const observer = new MutationObserver(() => {
+  const urlChanged = window.location.href !== lastUrl;
+  const activeDouyinId = currentDouyinActiveId();
+  const activeChanged = activeDouyinId !== undefined && activeDouyinId !== lastActiveDouyinId;
+  if (!urlChanged && !activeChanged) return;
+
+  lastUrl = window.location.href;
+  if (activeChanged) {
+    lastActiveDouyinId = activeDouyinId;
+  }
+  scheduleScan();
 });
 observer.observe(document.body, { childList: true, subtree: true });

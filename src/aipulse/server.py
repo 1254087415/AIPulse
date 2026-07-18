@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -9,7 +9,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from aipulse.collectors import arxiv, github, news  # noqa: F401  registers collectors
+from aipulse.collectors import (  # noqa: F401  registers collectors
+    arxiv,
+    baidu,
+    bilibili,
+    github,
+    news,
+    v2ex,
+    weibo,
+    zhihu,
+)
 from aipulse.collectors.registry import list_collectors
 from aipulse.core.config import get_settings
 from aipulse.hotspot.models import Source
@@ -25,6 +34,11 @@ DEFAULT_SOURCE_CONFIG: dict[str, dict] = {
     "rss_news": {"feed_url": "https://www.jiqizhixin.com/rss", "name": "机器之心"},
     "github": {"language": "Python"},
     "arxiv": {"categories": ["cs.AI", "cs.CL"]},
+    "bilibili_hot": {"rid": "0", "name": "Bilibili 热门"},
+    "zhihu_hot": {"limit": 50, "name": "知乎热榜"},
+    "weibo_hot": {"name": "微博热搜"},
+    "baidu_hot": {"name": "百度热搜"},
+    "v2ex_hot": {"name": "V2EX 热门"},
 }
 
 
@@ -81,7 +95,9 @@ app.include_router(scheduler_router, prefix="/api")
 
 
 @app.middleware("http")
-async def security_middleware(request: Request, call_next: callable) -> Response:
+async def security_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """Enforce optional API token auth and security headers."""
     path = request.url.path
     if path.startswith("/api"):
@@ -102,16 +118,16 @@ async def security_middleware(request: Request, call_next: callable) -> Response
                 ] = "default-src 'self'; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
                 return response
 
-    response = await call_next(request)
+    final_response = await call_next(request)
 
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers[
+    final_response.headers["X-Content-Type-Options"] = "nosniff"
+    final_response.headers["X-Frame-Options"] = "DENY"
+    final_response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    final_response.headers[
         "Content-Security-Policy"
     ] = "default-src 'self'; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
 
-    return response
+    return final_response
 
 
 @app.get("/health")

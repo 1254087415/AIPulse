@@ -1,80 +1,29 @@
 import { chromium, expect, test } from '@playwright/test';
-import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { startRealBackend, type RealBackend } from './helpers/real-backend';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
-const MOCK_PORT = 3457;
+const BACKEND_PORT = 3457;
 const REAL_DOUYIN_HOME_URL = 'https://www.douyin.com/';
 
 test.describe('AIPulse Clipper Douyin recognition on real pages', () => {
-  let server: http.Server;
-  let lastSubmission: {
-    url: string;
-    source: string;
-    mode: string;
-  } | null = null;
+  let backend: RealBackend;
 
   test.beforeAll(async () => {
-    server = http.createServer((req, res) => {
-      const url = new URL(req.url ?? '/', `http://localhost:${MOCK_PORT}`);
-
-      // The extension service worker fetches this mock cross-origin (port 3457 is
-      // not in the extension's host_permissions). A POST with Content-Type:
-      // application/json triggers a CORS preflight; we must answer it or Chromium
-      // blocks the real request and the submission never arrives. A real AIPulse
-      // backend would send the same headers.
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204, {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-          'Access-Control-Max-Age': '600',
-        });
-        res.end();
-        return;
-      }
-
-      if (url.pathname === '/api/videos/extract' && req.method === 'POST') {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk;
-        });
-        req.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            lastSubmission = {
-              url: parsed.url,
-              source: parsed.source,
-              mode: parsed.mode,
-            };
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            });
-            res.end(JSON.stringify({ task_id: 'e2e-douyin-123', url: parsed.url }));
-          } catch {
-            res.writeHead(400, { 'Access-Control-Allow-Origin': '*' });
-            res.end('bad request');
-          }
-        });
-        return;
-      }
-
-      res.writeHead(404, { 'Access-Control-Allow-Origin': '*' });
-      res.end('not found');
-    });
-
-    await new Promise<void>((resolve) => server.listen(MOCK_PORT, resolve));
+    // Real Python sidecar + HTTP bridge. No mock backend: submissions are
+    // forwarded to aipulse.desktop.sidecar's real submit_url and the returned
+    // task_id comes from the real task store.
+    backend = await startRealBackend(BACKEND_PORT);
   });
 
   test.afterAll(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await backend.close();
   });
 
-  test('recognizes video links from the real Douyin homepage', async () => {
+  test('recognizes video links from the real Douyin homepage and submits to the real sidecar', async () => {
+    test.setTimeout(90_000);
     const userDataDir = path.join(__dirname, '../.tmp/user-data-douyin');
 
     const context = await chromium.launchPersistentContext(userDataDir, {
@@ -112,7 +61,7 @@ test.describe('AIPulse Clipper Douyin recognition on real pages', () => {
         new Promise<void>((resolve) => {
           chrome.storage.local.set({ httpBaseUrl: `http://localhost:${port}` }, () => resolve());
         }),
-      MOCK_PORT
+      BACKEND_PORT
     );
 
     await warmupPage.close();
@@ -128,6 +77,7 @@ test.describe('AIPulse Clipper Douyin recognition on real pages', () => {
     await Promise.race([
       page.waitForSelector('[data-aweme-id]', { timeout: 20000 }),
       page.waitForSelector('[href*="/video/"]', { timeout: 20000 }),
+      page.waitForSelector('[data-e2e-vid]', { timeout: 20000 }),
     ]).catch(() => {
       // If neither anchor appears in time we still attempt extraction below and
       // let the foundLinks poll produce a clear failure with diagnostics.
@@ -174,8 +124,8 @@ test.describe('AIPulse Clipper Douyin recognition on real pages', () => {
     const douyinLinks = foundLinks.filter((link) => link.platform === 'douyin');
     expect(douyinLinks.length, 'should recognize at least one Douyin link on the homepage').toBeGreaterThan(0);
 
-    // Submit the first recognized link through the E2E bridge.
-    lastSubmission = null;
+    // Submit the first recognized link through the E2E bridge, all the way to
+    // the real sidecar.
     const firstLink = douyinLinks[0];
     await page.evaluate(
       (url) => {
@@ -188,10 +138,25 @@ test.describe('AIPulse Clipper Douyin recognition on real pages', () => {
       firstLink.url
     );
 
-    await expect.poll(() => lastSubmission, { timeout: 20000 }).not.toBeNull();
-    expect(lastSubmission!.url).toBe(firstLink.url);
-    expect(lastSubmission!.source).toBe('browser_extension');
-    expect(lastSubmission!.mode).toBe('archive');
+    // The real sidecar assigns task ids (12 hex chars, see aipulse task store).
+    await expect
+      .poll(() => backend.getSubmittedTaskId(), { timeout: 20000 })
+      .toMatch(/^[a-f0-9]{12}$/);
+
+    const submitBody = backend.getLastSubmitBody();
+    expect(submitBody).not.toBeNull();
+    expect(submitBody!.url).toBe(firstLink.url);
+    expect(submitBody!.source).toBe('browser_extension');
+    expect(submitBody!.mode).toBe('archive');
+
+    // The task must exist in the real sidecar's task store (front-back
+    // integration), regardless of how the async download pipeline fares
+    // against Douyin's login wall.
+    const status = await backend.client.request('get_task_status', {
+      task_id: backend.getSubmittedTaskId(),
+    });
+    expect(status.error, `get_task_status failed: ${JSON.stringify(status.error)}`).toBeUndefined();
+    expect(status.result?.status, 'task should have a valid status in the real store').toBeTruthy();
 
     await page.close();
     await context.close();

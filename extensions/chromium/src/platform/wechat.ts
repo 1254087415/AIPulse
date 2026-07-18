@@ -1,7 +1,7 @@
 import type { FoundLink } from '../types';
 import { extractMatches } from './_helpers';
 
-const WECHAT_PATTERN = /https?:\/\/mp\.weixin\.qq\.com\/s\/[\w\-=]+/i;
+const WECHAT_PATTERN = /https?:\/\/mp\.weixin\.qq\.com\/s\/[\w\-=]+(?=\?|$)/i;
 
 export function extractWechatLinks(document: Document, url: string): FoundLink[] {
   const candidates = new Set<string>();

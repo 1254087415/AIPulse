@@ -108,22 +108,35 @@ async function loadFoundLinks(): Promise<FoundLink[]> {
   });
 }
 
-async function loadFoundLinksByTab(): Promise<Record<string, FoundLink[]>> {
+interface TabLinksEntry {
+  url?: string;
+  links: FoundLink[];
+}
+
+function parseTabEntry(raw: unknown): TabLinksEntry | undefined {
+  if (Array.isArray(raw)) return { links: raw as FoundLink[] };
+  if (raw && typeof raw === 'object' && Array.isArray((raw as TabLinksEntry).links)) {
+    return raw as TabLinksEntry;
+  }
+  return undefined;
+}
+
+async function loadFoundLinksByTab(): Promise<Record<string, TabLinksEntry>> {
   const storage = getStorage();
   if (!storage) return {};
   return new Promise((resolve) => {
     storage.get(FOUND_LINKS_BY_TAB_KEY, (result) => {
       const map = result?.[FOUND_LINKS_BY_TAB_KEY];
-      resolve(map && typeof map === 'object' ? (map as Record<string, FoundLink[]>) : {});
+      resolve(map && typeof map === 'object' ? (map as Record<string, TabLinksEntry>) : {});
     });
   });
 }
 
-async function saveFoundLinksForTab(tabId: number, links: FoundLink[]): Promise<void> {
+async function saveFoundLinksForTab(tabId: number, links: FoundLink[], url?: string): Promise<void> {
   const storage = getStorage();
   if (!storage) return;
   const map = await loadFoundLinksByTab();
-  const updated = { ...map, [String(tabId)]: links };
+  const updated = { ...map, [String(tabId)]: { url, links } };
   return new Promise((resolve) => {
     storage.set({ [FOUND_LINKS_BY_TAB_KEY]: updated }, () => resolve());
   });
@@ -143,9 +156,21 @@ async function removeFoundLinksForTab(tabId: number): Promise<void> {
 
 async function loadFoundLinksForTab(tabId: number): Promise<FoundLink[]> {
   const map = await loadFoundLinksByTab();
-  const links = map[String(tabId)];
-  if (Array.isArray(links)) return links;
-  return loadFoundLinks();
+  const entry = parseTabEntry(map[String(tabId)]);
+  // No flat-key fallback: returning another tab's links would make the popup
+  // show stale content when the user switches tabs. The popup triggers a
+  // RESCAN instead when this returns empty.
+  return entry ? entry.links : [];
+}
+
+function isSamePageUrl(a: string, b: string): boolean {
+  try {
+    const urlA = new URL(a);
+    const urlB = new URL(b);
+    return urlA.origin === urlB.origin && urlA.pathname === urlB.pathname;
+  } catch {
+    return false;
+  }
 }
 
 async function saveFoundLinks(links: FoundLink[]): Promise<void> {
@@ -156,23 +181,76 @@ async function saveFoundLinks(links: FoundLink[]): Promise<void> {
   });
 }
 
-async function updateBadge(links: FoundLink[], tabId?: number): Promise<void> {
+const SUPPORTED_HOSTS = [
+  'bilibili.com',
+  'b23.tv',
+  'douyin.com',
+  'xiaohongshu.com',
+  'xhslink.com',
+  'mp.weixin.qq.com',
+  'youtube.com',
+  'youtu.be',
+  'localhost',
+];
+
+const ALLOWED_FETCH_HOSTS = [
+  'api.bilibili.com',
+  'hdslb.com',
+  'aisubtitle.hdslb.com',
+  'www.bilibili.com',
+  'bilibili.com',
+  'localhost',
+];
+
+function isAllowedFetchHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return ALLOWED_FETCH_HOSTS.some(
+      (allowed) => host === allowed || host.endsWith(`.${allowed}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isSupportedPage(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return SUPPORTED_HOSTS.some((supported) => host === supported || host.endsWith(`.${supported}`));
+  } catch {
+    return false;
+  }
+}
+
+async function setBadgeCount(count: number, tabId?: number): Promise<void> {
   if (typeof chrome === 'undefined' || !chrome.action) return;
-  const count = links.length;
-  const details: chrome.action.BadgeTextDetails = { text: count > 0 ? String(count) : '' };
-  if (tabId !== undefined) details.tabId = tabId;
-  await chrome.action.setBadgeText(details);
+  const text = count > 0 ? String(count) : '';
+  await chrome.action.setBadgeText(tabId !== undefined ? { text, tabId } : { text });
   await chrome.action.setBadgeBackgroundColor({ color: '#1677ff' });
+}
+
+async function reportBadge(links: FoundLink[], tabId?: number): Promise<void> {
+  // Global badge keeps "last reporter" semantics for backward compatibility
+  // (E2E tests read getBadgeText({})); per-tab badge gives each tab its own count.
+  await setBadgeCount(links.length);
+  if (tabId !== undefined) {
+    await setBadgeCount(links.length, tabId);
+  }
 }
 
 async function notify(title: string, message: string): Promise<void> {
   if (typeof chrome === 'undefined' || !chrome.notifications) return;
-  await chrome.notifications.create({
-    type: 'basic',
-    iconUrl: 'icon.png',
-    title,
-    message,
-  });
+  try {
+    await chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icon.png',
+      title,
+      message,
+    });
+  } catch {
+    // Notification creation can fail when the OS notification center is
+    // unavailable; the submission itself has already completed.
+  }
 }
 
 function senderTabId(sender: chrome.runtime.MessageSender): number | undefined {
@@ -191,9 +269,9 @@ export function handleMessage(
         const tabId = senderTabId(sender);
         await saveFoundLinks(deduped);
         if (tabId !== undefined) {
-          await saveFoundLinksForTab(tabId, deduped);
+          await saveFoundLinksForTab(tabId, deduped, sender.tab?.url);
         }
-        await updateBadge(deduped, tabId);
+        await reportBadge(deduped, tabId);
         sendResponse({ ok: true, count: deduped.length });
       } catch (err: unknown) {
         sendResponse({ ok: false, error: errorMessage(err) });
@@ -237,6 +315,10 @@ export function handleMessage(
   }
 
   if (message.type === 'FETCH_JSON' && isValidUrl(message.url)) {
+    if (!isAllowedFetchHost(message.url)) {
+      sendResponse({ ok: false, error: 'host not allowed' });
+      return false;
+    }
     const url = message.url;
     void (async () => {
       try {
@@ -269,6 +351,9 @@ export function setupContextMenus(): void {
 }
 
 export async function handleContextMenuClick(info: chrome.contextMenus.OnClickData): Promise<void> {
+  if (info.menuItemId !== 'archive-current-page' && info.menuItemId !== 'archive-link') {
+    return;
+  }
   const url = info.linkUrl || info.pageUrl;
   if (!isValidUrl(url)) return;
   try {
@@ -312,13 +397,26 @@ function handleTabRemoved(tabId: number): void {
 }
 
 function handleTabUpdated(tabId: number, changeInfo: chrome.tabs.TabChangeInfo): void {
-  // The tab navigated somewhere new. Clear its links and badge immediately so a
-  // stale count never lingers on unsupported pages (where no content script runs
-  // to report an empty result). Supported pages re-report within ~1s.
+  // The tab navigated somewhere new. Clear its per-tab links and badge so a stale
+  // count never lingers. On unsupported hosts no content script runs to re-report,
+  // so clear the global badge as well; supported pages re-report within ~1s.
   if (!changeInfo.url) return;
+  const navigatedUrl = changeInfo.url;
   void (async () => {
+    const map = await loadFoundLinksByTab();
+    const entry = parseTabEntry(map[String(tabId)]);
+    // Same-document URL tweaks (history.replaceState query/hash changes, e.g.
+    // Bilibili's ?t= playback-position updates) are not navigations — the content
+    // script does not re-run, so the stored links are still valid. Keep them.
+    if (entry?.url && isSamePageUrl(entry.url, navigatedUrl)) return;
+
     await removeFoundLinksForTab(tabId);
-    await updateBadge([], tabId);
+    await setBadgeCount(0, tabId);
+    if (!isSupportedPage(navigatedUrl)) {
+      // No content script will run on the new page to re-report, so the global
+      // badge would otherwise keep showing the previous tab's count forever.
+      await setBadgeCount(0);
+    }
   })();
 }
 

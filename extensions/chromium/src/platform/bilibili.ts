@@ -1,13 +1,20 @@
 import type { FoundLink, SubtitleOption } from '../types';
+import { dedupeLinks } from '../utils';
 import { extractBilibiliSubtitleOptions, fetchBilibiliSubtitleOptions } from './bilibili-subtitles';
 import { extractMatches } from './_helpers';
 
 const BILIBILI_PATTERN = /https?:\/\/(?:www\.)?bilibili\.com\/video\/(BV1[A-Za-z0-9]{8,})/i;
-const B23_SHORT_PATTERN = /https?:\/\/(?:www\.)?b23\.tv\/[A-Za-z0-9_-]+/i;
+const B23_SHORT_PATTERN = /https?:\/\/(?:www\.)?b23\.tv\/[A-Za-z0-9_-]+(?=\?|$)/i;
 
 function extractBvid(url: string): string | undefined {
   const match = url.match(BILIBILI_PATTERN);
-  return match ? match[1] : undefined;
+  if (match) return match[1];
+  try {
+    const param = new URL(url).searchParams.get('bvid');
+    return param && /^BV1[A-Za-z0-9]{8,}$/.test(param) ? param : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isBilibiliNonVideoPage(url: string): boolean {
@@ -15,7 +22,10 @@ function isBilibiliNonVideoPage(url: string): boolean {
     const parsed = new URL(url);
     const isBilibiliHost =
       parsed.hostname === 'bilibili.com' || parsed.hostname.endsWith('.bilibili.com');
-    return isBilibiliHost && !parsed.pathname.startsWith('/video/');
+    if (!isBilibiliHost) return false;
+    if (parsed.pathname.startsWith('/video/')) return false;
+    if (extractBvid(url)) return false;
+    return true;
   } catch {
     return false;
   }
@@ -98,13 +108,20 @@ export async function extractBilibiliLinks(document: Document, url: string): Pro
   if (canonical) {
     candidates.add(canonical.getAttribute('href') || '');
   }
+
+  // On list pages (/list/watchlater etc.) the current video only exists as a
+  // bvid query param; synthesize its canonical URL so it ranks before anchors.
+  const bvid = extractBvid(url);
+  if (bvid && !BILIBILI_PATTERN.test(url)) {
+    candidates.add(`https://www.bilibili.com/video/${bvid}`);
+  }
+
   candidates.add(url);
 
   for (const anchor of document.querySelectorAll('a[href]')) {
     candidates.add(anchor.getAttribute('href') || '');
   }
 
-  const bvid = extractBvid(url);
   const pageIds = bvid ? await extractBilibiliVideoIdsFromPage() : {};
   const apiSubtitleOptions = bvid
     ? await fetchApiSubtitleOptions(bvid, pageIds.cid, pageIds.aid)
@@ -115,7 +132,7 @@ export async function extractBilibiliLinks(document: Document, url: string): Pro
   const subtitleOptions =
     apiSubtitleOptions.length > 0 ? apiSubtitleOptions : inlineSubtitleOptions;
 
-  const links = extractMatches(
+  const rawLinks = extractMatches(
     candidates,
     [
       {
@@ -130,6 +147,8 @@ export async function extractBilibiliLinks(document: Document, url: string): Pro
     ],
     document.title
   );
+
+  const links = dedupeLinks(rawLinks);
 
   return links.map((link) => ({
     ...link,

@@ -21,6 +21,13 @@ from aipulse.store.database import (
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("AUTO_CREATE_TABLES", "true")
 
+# Override settings that may be loaded from the local .env file so that tests
+# observe the same values as the code defaults regardless of the developer's
+# environment configuration.
+os.environ["LLM_BASE_URL"] = "https://api.kimi.com/coding/v1"
+os.environ["LLM_MODEL"] = "kimi-for-coding"
+os.environ.pop("LLM_API_KEY", None)
+
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def _use_test_database() -> None:

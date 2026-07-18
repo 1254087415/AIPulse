@@ -8,6 +8,8 @@ const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
 const MOCK_PORT = 3456;
 const REAL_BILIBILI_URL = 'https://www.bilibili.com/video/BV1JNMV6dEp2/';
 
+test.describe.configure({ retries: 2 });
+
 test.describe('AIPulse Clipper subtitle recognition on real Bilibili page', () => {
   let server: http.Server;
   let lastSubmission: {

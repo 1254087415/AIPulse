@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { formatSubtitleEntries } from './platform/bilibili-subtitles';
+import { extractDouyinVideoId } from './platform/douyin-share';
 import type { FoundLink, SubmitMode, SubmitResult, SubtitleEntry } from './types';
 import { cleanTrackingParams } from './utils';
 import './popup.css';
@@ -59,6 +60,7 @@ function Popup() {
   const [subtitleEntries, setSubtitleEntries] = useState<SubtitleEntry[]>([]);
   const [selectedSubtitleLan, setSelectedSubtitleLan] = useState('');
   const [subtitleLoading, setSubtitleLoading] = useState(false);
+  const [shareUrlLoading, setShareUrlLoading] = useState(false);
   const [version, setVersion] = useState('');
   const lastLinkUrlRef = useRef<string | null>(null);
   const pendingSubtitleLanRef = useRef<string | null>(null);
@@ -67,22 +69,29 @@ function Popup() {
     const normalizedTabUrl = normalizeUrl(tabUrl);
     const tabBvId = extractBvId(tabUrl);
 
-    return (
-      foundLinks.find((link) => {
-        const normalizedLinkUrl = normalizeUrl(link.url);
-        if (normalizedLinkUrl === normalizedTabUrl || link.url === tabUrl) {
-          return true;
-        }
-        if (tabBvId && link.platform === 'bilibili') {
-          const linkBvId = extractBvId(link.url);
-          return linkBvId === tabBvId;
-        }
-        return false;
-      }) || null
-    );
+    const exact = foundLinks.find((link) => {
+      const normalizedLinkUrl = normalizeUrl(link.url);
+      if (normalizedLinkUrl === normalizedTabUrl || link.url === tabUrl) {
+        return true;
+      }
+      if (tabBvId && link.platform === 'bilibili') {
+        const linkBvId = extractBvId(link.url);
+        return linkBvId === tabBvId;
+      }
+      return false;
+    });
+    if (exact) return exact;
+
+    // Homepage-style pages (e.g. Douyin feed) have no single canonical URL of
+    // their own; surface the first recognized link instead of an empty state.
+    return foundLinks[0] || null;
   }, [tabUrl, foundLinks]);
 
   const subtitleOptions = currentLink?.metadata?.subtitleOptions || [];
+  // Douyin's official share short link (https://v.douyin.com/xxx) is what the
+  // download pipeline consumes; prefer it for display, copy and submit when
+  // the extractor resolved one. The canonical long URL stays in link.url.
+  const displayUrl = currentLink?.metadata?.shareUrl || currentLink?.url || '';
 
   const loadState = async () => {
     try {
@@ -95,7 +104,25 @@ function Popup() {
         type: 'GET_FOUND_LINKS',
         tabId: tab?.id,
       })) as { links?: FoundLink[] } | undefined;
-      setFoundLinks(response?.links || []);
+      let links = response?.links || [];
+
+      // No stored entry for this tab (e.g. the page was open before the
+      // extension loaded, or its entry was cleared): ask the content script
+      // to rescan now so the popup always reflects the current tab.
+      if (links.length === 0 && tab?.id) {
+        try {
+          const rescan = (await chrome.tabs.sendMessage(tab.id, {
+            type: 'RESCAN',
+          })) as { ok: boolean; links?: FoundLink[] } | undefined;
+          if (rescan?.ok && rescan.links) {
+            links = rescan.links;
+          }
+        } catch {
+          // No content script on this page (unsupported site) — show empty state.
+        }
+      }
+
+      setFoundLinks(links);
     } catch (err) {
       setStatus(`获取页面失败: ${getErrorMessage(err)}`);
       setIsError(true);
@@ -166,6 +193,73 @@ function Popup() {
     }
   }, [currentLink, hasUserEditedTitle, tabId, subtitleOptions, handleSubtitleChange]);
 
+  // For Douyin links, try to capture the official share short link by hovering
+  // the share button in the active slide. This is necessary because Douyin's
+  // web_shorten endpoint is protected by anti-bot signatures that we cannot
+  // generate ourselves.
+  useEffect(() => {
+    if (
+      !currentLink ||
+      currentLink.platform !== 'douyin' ||
+      currentLink.metadata?.shareUrl ||
+      !tabId
+    ) {
+      return;
+    }
+    const videoId = extractDouyinVideoId(currentLink.url);
+    if (!videoId) return;
+
+    let cancelled = false;
+    setShareUrlLoading(true);
+    setStatus('正在获取抖音分享短链...');
+    setIsError(false);
+    chrome.tabs
+      .sendMessage(tabId, { type: 'FETCH_DOUYIN_SHARE_URL', videoId })
+      .then((response) => {
+        if (cancelled) return;
+        const res = response as { ok: boolean; shareUrl?: string } | undefined;
+        if (res?.ok && res.shareUrl) {
+          setFoundLinks((prev) =>
+            prev.map((link) =>
+              link.url === currentLink.url
+                ? {
+                      ...link,
+                      metadata: {
+                        platform: link.platform,
+                        url: link.url,
+                        title: link.metadata?.title || link.title || '',
+                        subtitleOptions: link.metadata?.subtitleOptions || [],
+                        subtitleEntries: link.metadata?.subtitleEntries || [],
+                        selectedSubtitleLan: link.metadata?.selectedSubtitleLan || '',
+                        ...link.metadata,
+                        shareUrl: res.shareUrl,
+                      },
+                    }
+                : link
+            )
+          );
+          setStatus('抖音短链已获取');
+          setIsError(false);
+        } else {
+          setStatus('未获取到抖音短链，可悬停分享按钮后重试');
+          setIsError(true);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStatus(`获取抖音短链失败: ${getErrorMessage(err)}`);
+          setIsError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setShareUrlLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentLink, tabId]);
+
   const handleTitleChange = (value: string) => {
     setTitle(value);
     setHasUserEditedTitle(true);
@@ -174,7 +268,7 @@ function Popup() {
   const handleCopyUrl = async () => {
     if (!currentLink) return;
     try {
-      await navigator.clipboard.writeText(currentLink.url);
+      await navigator.clipboard.writeText(displayUrl);
       setStatus('链接已复制');
       setIsError(false);
     } catch (err) {
@@ -204,7 +298,7 @@ function Popup() {
       const trimmedTitle = title.trim();
       const result = (await chrome.runtime.sendMessage({
         type: 'SUBMIT_URL',
-        url: currentLink.url,
+        url: displayUrl,
         title: trimmedTitle || undefined,
         mode,
         tags: parseTags(tags),
@@ -239,7 +333,7 @@ function Popup() {
           type="button"
           className="icon-btn"
           onClick={loadState}
-          disabled={loading || subtitleLoading}
+          disabled={loading || subtitleLoading || shareUrlLoading}
           title="刷新"
           aria-label="刷新"
         >
@@ -267,9 +361,9 @@ function Popup() {
             </label>
             <label className="field">
               <span className="field-label">链接</span>
-              <span className="url-value" title={currentLink.url}>
-                {isShortLink(currentLink.url) && <span className="short-badge">短链</span>}
-                {currentLink.url}
+              <span className="url-value" title={displayUrl}>
+                {isShortLink(displayUrl) && <span className="short-badge">短链</span>}
+                {displayUrl}
               </span>
             </label>
             <label className="field">
@@ -290,7 +384,7 @@ function Popup() {
                   <select
                     value={selectedSubtitleLan}
                     onChange={(e) => handleSubtitleChange(e.target.value)}
-                    disabled={loading || subtitleLoading}
+                    disabled={loading || subtitleLoading || shareUrlLoading}
                   >
                     {subtitleOptions.map((option) => (
                       <option key={option.lan} value={option.lan}>
@@ -321,7 +415,7 @@ function Popup() {
                 type="button"
                 className={mode === value ? 'active' : ''}
                 onClick={() => setMode(value)}
-                disabled={loading || subtitleLoading}
+                disabled={loading || subtitleLoading || shareUrlLoading}
                 aria-pressed={mode === value}
               >
                 {label}
@@ -330,14 +424,14 @@ function Popup() {
           </div>
 
           <div className="actions">
-            <button type="button" onClick={handleCopyUrl} disabled={loading || subtitleLoading}>
+            <button type="button" onClick={handleCopyUrl} disabled={loading || subtitleLoading || shareUrlLoading}>
               复制链接
             </button>
             {subtitleEntries.length > 0 && (
               <button
                 type="button"
                 onClick={handleCopySubtitle}
-                disabled={loading || subtitleLoading}
+                disabled={loading || subtitleLoading || shareUrlLoading}
               >
                 复制字幕
               </button>
@@ -347,7 +441,7 @@ function Popup() {
             type="button"
             className="primary submit-btn"
             onClick={handleSubmit}
-            disabled={loading || subtitleLoading}
+            disabled={loading || subtitleLoading || shareUrlLoading}
           >
             归档到 AIPulse
           </button>
