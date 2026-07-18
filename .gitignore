@@ -195,3 +195,12 @@ src-tauri/resources/
 # Claude Code skill artifacts
 .agents/
 skills-lock.json
+
+# Playwright MCP / agent tool artifacts
+.playwright-mcp/
+.agnes/
+
+# Temporary design screenshots and manual dev scripts
+web-*.png
+extensions/chromium/tests/manual/
+.worktrees/
