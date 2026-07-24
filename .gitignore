@@ -49,6 +49,10 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+
+# pnpm artifacts (project uses npm — pnpm files only appear from accidental runs)
+frontend/pnpm-lock.yaml
+frontend/pnpm-workspace.yaml
 .pytest_cache/
 cover/
 
