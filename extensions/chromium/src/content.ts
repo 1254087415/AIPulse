@@ -2,12 +2,38 @@ import { fetchSubtitleEntries, formatSubtitleEntries } from './platform/bilibili
 import { extractActiveFeedVideoId } from './platform/douyin';
 import {
   extractDouyinVideoId,
+  getCapturedShareUrl,
   installShareCapture,
   requestShareUrlCapture,
+  findActiveSlideShareHoverPoint,
 } from './platform/douyin-share';
+import { DOUYIN_DEBUGGER_CONSENT_KEY } from './popup-debugger';
 import { extractAllLinks } from './platform/registry';
 import type { SubmitMode, SubtitleEntry } from './types';
 import { cleanTrackingParams, dedupeLinks } from './utils';
+
+// ---------------------------------------------------------------------------
+// Safe wrapper for chrome.runtime.sendMessage.
+// Handles:
+// - Synchronous throw when extension context is invalidated
+// - chrome.runtime.lastError in callback
+// - Never forms an unhandled rejection
+// ---------------------------------------------------------------------------
+function safeSendMessage(message: unknown): Promise<{ ok?: boolean; captured?: boolean; fallback?: boolean; error?: string } | undefined> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        // Suppress lastError — it indicates the extension context was
+        // invalidated, which is expected during navigation/restart.
+        void chrome.runtime.lastError;
+        resolve(response as { ok?: boolean; captured?: boolean; fallback?: boolean; error?: string } | undefined);
+      });
+    } catch {
+      // Synchronous throw: extension context invalidated.
+      resolve(undefined);
+    }
+  });
+}
 
 async function scanAndReport() {
   try {
@@ -26,6 +52,53 @@ async function scanAndReport() {
 }
 
 scanAndReport();
+
+// ---------------------------------------------------------------------------
+// Helper: wait for the main-world interceptor to capture a short link URL.
+// Polls capturedShareUrls (populated by the douyin-share main-world interceptor)
+// until the URL for the given videoId appears, or the timeout expires.
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads the user's consent for chrome.debugger-based hover from
+ * chrome.storage.local. Returns true only when the user has explicitly
+ * accepted the debugger attach banner. Returns false in any other case
+ * (no value, invalid value, chrome unavailable, storage error) so that
+ * the safe long-link fallback always wins.
+ */
+async function readDouyinDebuggerConsent(): Promise<boolean> {
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return false;
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(DOUYIN_DEBUGGER_CONSENT_KEY, (result) => {
+        void chrome.runtime.lastError;
+        resolve(result?.[DOUYIN_DEBUGGER_CONSENT_KEY] === true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+function waitForCapturedShareUrl(videoId: string, timeoutMs: number): Promise<string | undefined> {
+  const pollInterval = 100;
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const check = (): void => {
+      const url = getCapturedShareUrl(videoId);
+      if (url) {
+        resolve(url);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve(undefined);
+        return;
+      }
+      setTimeout(check, pollInterval);
+    };
+    check();
+  });
+}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'FETCH_SUBTITLE' && message.subtitleUrl) {
@@ -50,7 +123,51 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'FETCH_DOUYIN_SHARE_URL' && message.videoId) {
     void (async () => {
       try {
-        const shareUrl = await requestShareUrlCapture(document, String(message.videoId));
+        const videoId = String(message.videoId);
+
+        // Step 1: Check if we already have a captured short link for this video.
+        const cached = getCapturedShareUrl(videoId);
+        if (cached) {
+          sendResponse({ ok: true, shareUrl: cached });
+          return;
+        }
+
+        // Step 2: Find the share button hover point on the current page.
+        const point = findActiveSlideShareHoverPoint(document);
+
+        // Step 2.5: Honor user consent. chrome.debugger.attach triggers a
+        // browser-level "Debugger is attached" banner — until the user has
+        // explicitly accepted the explanation prompt, skip the debugger path
+        // entirely and rely on the long-link fallback.
+        const consentGranted = await readDouyinDebuggerConsent();
+
+        if (point && consentGranted) {
+          // Step 3a: Ask the background service worker to dispatch a trusted hover
+          // via chrome.debugger (MV3 service worker cannot use debugger directly).
+          try {
+            const debuggerResponse = await safeSendMessage({
+              type: 'DOUYIN_DEBUGGER_HOVER',
+              point,
+            });
+
+            if (debuggerResponse?.ok && !debuggerResponse?.fallback) {
+              // Step 4a: Debugger succeeded — wait up to 5000 ms for the main-world
+              // interceptor to populate capturedShareUrls.
+              const captured = await waitForCapturedShareUrl(videoId, 5000);
+              if (captured) {
+                sendResponse({ ok: true, shareUrl: captured });
+                return;
+              }
+              // Timeout: fall through to Step 3b
+            }
+            // debuggerResponse.fallback === true or ok === false: fall through to Step 3b
+          } catch {
+            // Runtime error (extension context invalidated, etc.): fall through to Step 3b
+          }
+        }
+
+        // Step 3b: Fallback — use the existing copy-link synthesis flow.
+        const shareUrl = await requestShareUrlCapture(document, videoId);
         sendResponse({ ok: !!shareUrl, shareUrl });
       } catch (error: unknown) {
         sendResponse({

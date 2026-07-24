@@ -2,6 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client';
 import { formatSubtitleEntries } from './platform/bilibili-subtitles';
 import { extractDouyinVideoId } from './platform/douyin-share';
+import {
+  getDouyinDebuggerConsent,
+  setDouyinDebuggerConsent,
+} from './popup-debugger';
 import type { FoundLink, SubmitMode, SubmitResult, SubtitleEntry } from './types';
 import { cleanTrackingParams } from './utils';
 import './popup.css';
@@ -46,7 +50,7 @@ function isShortLink(url: string): boolean {
   }
 }
 
-function Popup() {
+export function Popup() {
   const [tabUrl, setTabUrl] = useState('');
   const [tabId, setTabId] = useState<number | undefined>(undefined);
   const [foundLinks, setFoundLinks] = useState<FoundLink[]>([]);
@@ -61,6 +65,8 @@ function Popup() {
   const [selectedSubtitleLan, setSelectedSubtitleLan] = useState('');
   const [subtitleLoading, setSubtitleLoading] = useState(false);
   const [shareUrlLoading, setShareUrlLoading] = useState(false);
+  const [debuggerConsent, setDebuggerConsent] = useState<boolean | null>(null);
+  const [debuggerConsentSubmitting, setDebuggerConsentSubmitting] = useState(false);
   const [version, setVersion] = useState('');
   const lastLinkUrlRef = useRef<string | null>(null);
   const pendingSubtitleLanRef = useRef<string | null>(null);
@@ -123,6 +129,9 @@ function Popup() {
       }
 
       setFoundLinks(links);
+
+      const consent = await getDouyinDebuggerConsent();
+      setDebuggerConsent(consent === true);
     } catch (err) {
       setStatus(`获取页面失败: ${getErrorMessage(err)}`);
       setIsError(true);
@@ -197,12 +206,18 @@ function Popup() {
   // the share button in the active slide. This is necessary because Douyin's
   // web_shorten endpoint is protected by anti-bot signatures that we cannot
   // generate ourselves.
+  //
+  // Important: this effect must NOT trigger the debugger path unless the user
+  // has explicitly accepted the consent prompt. chrome.debugger.attach displays
+  // a Chrome-level "Debugger is attached" banner that we never want to show
+  // without warning.
   useEffect(() => {
     if (
       !currentLink ||
       currentLink.platform !== 'douyin' ||
       currentLink.metadata?.shareUrl ||
-      !tabId
+      !tabId ||
+      debuggerConsent !== true
     ) {
       return;
     }
@@ -258,7 +273,26 @@ function Popup() {
     return () => {
       cancelled = true;
     };
-  }, [currentLink, tabId]);
+  }, [currentLink, tabId, debuggerConsent]);
+
+  const handleDebuggerConsent = useCallback(
+    async (accepted: boolean) => {
+      if (debuggerConsentSubmitting) return;
+      setDebuggerConsentSubmitting(true);
+      try {
+        await setDouyinDebuggerConsent(accepted);
+        setDebuggerConsent(accepted);
+        setStatus(accepted ? '已启用抖音短链自动捕获' : '已禁用抖音短链自动捕获');
+        setIsError(false);
+      } catch (err) {
+        setStatus(`保存偏好失败: ${getErrorMessage(err)}`);
+        setIsError(true);
+      } finally {
+        setDebuggerConsentSubmitting(false);
+      }
+    },
+    [debuggerConsentSubmitting]
+  );
 
   const handleTitleChange = (value: string) => {
     setTitle(value);
@@ -344,6 +378,35 @@ function Popup() {
       <p className={`status ${isError ? 'is-error' : ''}`} role="status" aria-live="polite">
         {status}
       </p>
+
+      {currentLink?.platform === 'douyin' && debuggerConsent === false && (
+        <section className="debugger-card" aria-labelledby="debugger-consent-title">
+          <h2 id="debugger-consent-title">启用抖音分享短链自动捕获</h2>
+          <p>
+            抖音分享短链（v.douyin.com）需要浏览器附加 Chrome 调试器，附加期间会在浏览器顶部显示黄色的 "Debugger is attached" 提示条。点击"启用"以开启自动悬停抓取；点击"暂不启用"将仅使用普通长链接。
+          </p>
+          <div className="debugger-actions">
+            <button
+              type="button"
+              className="debugger-confirm"
+              onClick={() => handleDebuggerConsent(true)}
+              disabled={debuggerConsentSubmitting}
+              aria-label="启用抖音短链自动捕获"
+            >
+              启用
+            </button>
+            <button
+              type="button"
+              className="debugger-decline"
+              onClick={() => handleDebuggerConsent(false)}
+              disabled={debuggerConsentSubmitting}
+              aria-label="暂不启用抖音短链自动捕获"
+            >
+              暂不启用
+            </button>
+          </div>
+        </section>
+      )}
 
       {currentLink ? (
         <>
@@ -455,4 +518,10 @@ function Popup() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<Popup />);
+// Guard: skip the production mount when running inside Vitest.
+// The test file dynamically imports Popup and renders it via @testing-library,
+// so the top-level createRoot must not fire a second time.
+// In a real browser or production build this always runs.
+if (!import.meta.env?.VITEST) {
+  ReactDOM.createRoot(document.getElementById('root')!).render(<Popup />);
+}
