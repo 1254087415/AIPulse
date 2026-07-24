@@ -25,6 +25,7 @@ from aipulse.hotspot.models import Source
 from aipulse.scheduler.client import get_scheduler
 from aipulse.scheduler.jobs.digest_generate import generate_daily_digest
 from aipulse.scheduler.jobs.hotspot_sync import sync_all_sources
+from aipulse.scheduler.jobs.vault_scan import scan_obsidian_vault_job
 from aipulse.scheduler.webui import register_scheduler_listeners
 from aipulse.scheduler.webui import router as scheduler_router
 from aipulse.api.followed_up import router as followed_up_router
@@ -82,6 +83,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         generate_daily_digest,
         trigger=CronTrigger(hour=8, minute=0),
         id="digest_generate",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        scan_obsidian_vault_job,
+        trigger=IntervalTrigger(hours=6),
+        id="vault_scan",
         replace_existing=True,
     )
     register_scheduler_listeners()
