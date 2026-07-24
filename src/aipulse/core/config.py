@@ -42,9 +42,13 @@ class AppSettings(BaseSettings):
     llm_model: str = "kimi-for-coding"
 
     # v0.3 — Kimi specific (independent config; used by follow + learning phase)
+    # NOTE: kimi_* defaults are aligned with the Kimi coding endpoint per
+    # v0.3 spec §5.3 (kimi-for-coding + api.kimi.com/coding/v1). If the user
+    # later decides to keep llm_* as the canonical Kimi path instead, this
+    # block can be reverted.
     kimi_api_key: SecretStr = Field(default=SecretStr(""))
-    kimi_base_url: str = "https://api.moonshot.cn/v1"
-    kimi_model: str = "kimi-k2.6"
+    kimi_base_url: str = "https://api.kimi.com/coding/v1"
+    kimi_model: str = "kimi-for-coding"
     learning_notification_enabled: bool = True
 
     # Whisper

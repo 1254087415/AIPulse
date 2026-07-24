@@ -175,16 +175,17 @@ async def test_validate_followed_up_endpoint(client, monkeypatch):
         "profile_url": "https://space.bilibili.com/1567748478",
     }
     response = await client.post("/api/followed-up/validate", json=payload)
-    # Either 200 (network OK) or 502 (network blocked) – both confirm the
-    # endpoint is wired and returns a structured envelope.
-    assert response.status_code in (200, 502)
+    # Either 200 (network OK) or 409 (both strategies report non-existent)
+    # or 502 (network blocked) – all confirm the endpoint is wired and
+    # returns a structured envelope.
+    assert response.status_code in (200, 409, 502)
     body = response.json()
-    assert "success" in body
+    assert "success" in body or "detail" in body
 
 
 @pytest.mark.integration
-async def test_sync_followed_up_returns_501_phase2_placeholder(client):
-    """POST /api/followed-up/{id}/sync returns 501 (Phase 2 placeholder)."""
+async def test_sync_followed_up_returns_202(client):
+    """POST /api/followed-up/{id}/sync returns 202 Accepted (Phase 2 implementation)."""
     payload = {
         "platform": "bilibili",
         "uid": "999",
@@ -195,8 +196,11 @@ async def test_sync_followed_up_returns_501_phase2_placeholder(client):
     record_id = create.json()["data"]["id"]
 
     response = await client.post(f"/api/followed-up/{record_id}/sync")
-    assert response.status_code == 501
-    assert "phase 2" in response.json().get("error", "").lower()
+    assert response.status_code == 202
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["followed_up_id"] == record_id
+    assert body["data"]["status"] in ("ok", "timeout")
 
 
 @pytest.mark.integration

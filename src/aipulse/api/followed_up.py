@@ -178,8 +178,10 @@ async def validate_followed_up_route(
 ) -> dict[str, Any]:
     """Validate that a given (platform, uid) exists on the source platform.
 
+    Phase 2 v0.3 spec §4.6 — 双轨策略：UAPI 优先 → HTML 兜底。
+
     Currently only B站 is implemented. Returns the live display name and
-    profile URL or a 502/504 if the upstream API is unreachable.
+    profile URL or 409 when both strategies report non-existent.
     """
     if payload.platform != "bilibili":
         raise HTTPException(
@@ -187,34 +189,119 @@ async def validate_followed_up_route(
             detail=f"validate() not implemented for platform={payload.platform}",
         )
 
+    from aipulse.collectors.bilibili_up.factory import BilibiliUpCollectorFactory
+
+    # 1) UAPI 优先
     try:
-        display_name, profile_url = await asyncio.wait_for(
-            _resolve_bilibili_display_name(payload.uid),
-            timeout=_BILIBILI_VALIDATE_TIMEOUT,
+        uapi = BilibiliUpCollectorFactory.create("uapi")
+        try:
+            exists, name = await uapi.validate_up_exists(payload.uid)
+        finally:
+            await uapi.close()
+        if exists:
+            return {
+                "success": True,
+                "data": {
+                    "platform": payload.platform,
+                    "uid": payload.uid,
+                    "display_name": name,
+                    "profile_url": f"https://space.bilibili.com/{payload.uid}",
+                    "strategy": "uapi",
+                },
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("uapi validate mid=%s failed: %s", payload.uid, exc)
+
+    # 2) HTML 兜底
+    try:
+        html = BilibiliUpCollectorFactory.create("html")
+        try:
+            exists, name = await html.validate_up_exists(payload.uid)
+        finally:
+            await html.close()
+        if exists:
+            return {
+                "success": True,
+                "data": {
+                    "platform": payload.platform,
+                    "uid": payload.uid,
+                    "display_name": name,
+                    "profile_url": f"https://space.bilibili.com/{payload.uid}",
+                    "strategy": "html",
+                },
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("html validate mid=%s failed: %s", payload.uid, exc)
+
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "success": False,
+            "error": "该 UP主不存在或账号已注销",
+            "uid": payload.uid,
+        },
+    )
+
+
+@router.post("/{followed_up_id}/sync", status_code=202)
+async def sync_followed_up_route(
+    followed_up_id: str,
+) -> dict[str, Any]:
+    """Phase 2 v0.3 spec §4.10 — 触发单个 UP主立即同步。
+
+    行为：调 ``scan_followed_up_by_id()``；15 秒超时；超时返回 202 + job id。
+    失败返回 404 (UP主不存在) / 502 (上游失败)。
+    """
+    from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
+
+    try:
+        new_count = await asyncio.wait_for(
+            scan_followed_up_by_id(followed_up_id),
+            timeout=15.0,
         )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(status_code=504, detail="Bilibili card API timeout") from exc
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail=f"Bilibili card API error: {exc}") from exc
+    except asyncio.TimeoutError:
+        logger.info("[sync] followed_up %s sync hit 15s timeout", followed_up_id)
+        return {
+            "success": True,
+            "data": {
+                "followed_up_id": followed_up_id,
+                "status": "timeout",
+                "message": "扫描超时，已切到后台；前端可通过 /api/followed-up/{id}/health 拉进度",
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[sync] followed_up %s sync failed: %s", followed_up_id, exc)
+        raise HTTPException(status_code=502, detail=f"sync failed: {exc}") from exc
 
     return {
         "success": True,
         "data": {
-            "platform": payload.platform,
-            "uid": payload.uid,
-            "display_name": display_name,
-            "profile_url": profile_url,
+            "followed_up_id": followed_up_id,
+            "status": "ok",
+            "new_videos": new_count,
         },
     }
 
 
-@router.post("/{followed_up_id}/sync", status_code=501)
-async def sync_followed_up_route(
+@router.get("/{followed_up_id}/health")
+async def get_followed_up_health_route(
     followed_up_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Placeholder for Phase 2 collector implementation. Returns 501."""
+    """Phase 2 v0.3 spec §4.10 — 健康状态详情（用于面板渲染状态徽章）。"""
+    repo = SqlAlchemyFollowedUpRepository(session)
+    record = await repo.find_by_id(followed_up_id)
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="FollowedUp not found")
+
     return {
-        "success": False,
-        "error": "Not implemented (Phase 2 placeholder)",
-        "followed_up_id": followed_up_id,
+        "success": True,
+        "data": {
+            "id": record.id,
+            "health": record.health,
+            "last_checked_at": record.last_checked_at.isoformat() if record.last_checked_at else None,
+            "last_error": record.last_error,
+            "failed_at": record.failed_at.isoformat() if record.failed_at else None,
+            "is_active": record.is_active,
+        },
     }

@@ -108,8 +108,9 @@ def test_settings_kimi_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
 
     settings = get_settings()
-    assert settings.kimi_base_url == "https://api.moonshot.cn/v1"
-    assert settings.kimi_model == "kimi-k2.6"
+    # Defaults aligned with v0.3 spec §5.3 (kimi-for-coding + Kimi coding endpoint).
+    assert settings.kimi_base_url == "https://api.kimi.com/coding/v1"
+    assert settings.kimi_model == "kimi-for-coding"
     assert settings.learning_notification_enabled is True
     # SecretStr default is empty
     assert settings.kimi_api_key.get_secret_value() == ""
