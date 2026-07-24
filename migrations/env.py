@@ -8,6 +8,9 @@ from sqlalchemy import engine_from_config, pool
 # Import hotspot and scheduler models so their tables are registered in
 # Base.metadata for Alembic autogenerate.
 import aipulse.hotspot.models  # noqa: F401
+import aipulse.models.followed_up  # noqa: F401
+import aipulse.models.followed_up_collections  # noqa: F401
+import aipulse.models.learning_events  # noqa: F401
 import aipulse.scheduler.models  # noqa: F401
 from aipulse.core.config import get_settings
 from aipulse.store.models import Base

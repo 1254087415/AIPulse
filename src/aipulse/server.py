@@ -27,8 +27,10 @@ from aipulse.scheduler.jobs.digest_generate import generate_daily_digest
 from aipulse.scheduler.jobs.hotspot_sync import sync_all_sources
 from aipulse.scheduler.webui import register_scheduler_listeners
 from aipulse.scheduler.webui import router as scheduler_router
+from aipulse.api.followed_up import router as followed_up_router
 from aipulse.store.database import close_db, get_session_maker, init_db
 from aipulse.web.routes import router as web_router
+from aipulse.web.security_middleware import verify_auth_header
 
 DEFAULT_SOURCE_CONFIG: dict[str, dict] = {
     "rss_news": {"feed_url": "https://www.jiqizhixin.com/rss", "name": "机器之心"},
@@ -92,31 +94,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="AIPulse", version="0.2.0", lifespan=lifespan)
 app.include_router(web_router, prefix="/api")
 app.include_router(scheduler_router, prefix="/api")
+app.include_router(followed_up_router, prefix="/api")
 
 
 @app.middleware("http")
 async def security_middleware(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Enforce optional API token auth and security headers."""
+    """Enforce optional Bearer API token auth and security headers.
+
+    v0.3 §9.3: All API routes use ``Authorization: Bearer <token>``.
+    The legacy ``X-AIPulse-Token`` header is no longer accepted.
+    """
     path = request.url.path
     if path.startswith("/api"):
-        settings = get_settings()
-        token = settings.aipulse_api_token.get_secret_value()
-        if token:
-            header_token = request.headers.get("X-AIPulse-Token", "")
-            if header_token != token:
-                response = JSONResponse(
-                    status_code=401,
-                    content={"success": False, "error": "Unauthorized"},
-                )
-                response.headers["X-Content-Type-Options"] = "nosniff"
-                response.headers["X-Frame-Options"] = "DENY"
-                response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-                response.headers[
-                    "Content-Security-Policy"
-                ] = "default-src 'self'; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
-                return response
+        if not verify_auth_header(request):
+            response = JSONResponse(
+                status_code=401,
+                content={"success": False, "error": "Unauthorized"},
+            )
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            response.headers[
+                "Content-Security-Policy"
+            ] = "default-src 'self'; connect-src 'self' http://localhost:8000 http://127.0.0.1:8000; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
+            return response
 
     final_response = await call_next(request)
 

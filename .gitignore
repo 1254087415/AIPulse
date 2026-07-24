@@ -197,6 +197,9 @@ src-tauri/resources/
 .agents/
 skills-lock.json
 
+# OpenAI Codex CLI local config (agents + MCP servers)
+.codex/
+
 # Playwright MCP / agent tool artifacts
 .playwright-mcp/
 .agnes/
