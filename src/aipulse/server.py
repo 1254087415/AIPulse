@@ -28,7 +28,9 @@ from aipulse.scheduler.jobs.hotspot_sync import sync_all_sources
 from aipulse.scheduler.webui import register_scheduler_listeners
 from aipulse.scheduler.webui import router as scheduler_router
 from aipulse.api.followed_up import router as followed_up_router
+from aipulse.api.summary import router as summary_router
 from aipulse.store.database import close_db, get_session_maker, init_db
+from aipulse.summarizers.queue import get_queue, reset_queue_for_tests
 from aipulse.web.routes import router as web_router
 from aipulse.web.security_middleware import verify_auth_header
 
@@ -84,10 +86,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     register_scheduler_listeners()
     scheduler.start()
+    # Phase 4 — start in-process summary job queue worker
+    summary_queue = get_queue()
+    await summary_queue.start()
     try:
         yield
     finally:
         scheduler.shutdown(wait=False)
+        await summary_queue.stop()
+        await reset_queue_for_tests()
         await close_db()
 
 
@@ -95,6 +102,7 @@ app = FastAPI(title="AIPulse", version="0.2.0", lifespan=lifespan)
 app.include_router(web_router, prefix="/api")
 app.include_router(scheduler_router, prefix="/api")
 app.include_router(followed_up_router, prefix="/api")
+app.include_router(summary_router, prefix="/api")
 
 
 @app.middleware("http")

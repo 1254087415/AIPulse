@@ -6,4 +6,7 @@
 from aipulse.models import followed_up  # noqa: F401
 from aipulse.models import followed_up_collections  # noqa: F401
 from aipulse.models import learning_events  # noqa: F401
+from aipulse.models.summary_jobs import SummaryJob  # noqa: F401
+
+__all__ = ["SummaryJob"]  # noqa: F401
 
