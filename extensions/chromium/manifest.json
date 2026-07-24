@@ -10,7 +10,8 @@
     "nativeMessaging",
     "notifications",
     "storage",
-    "tabs"
+    "tabs",
+    "debugger"
   ],
   "host_permissions": [
     "https://www.bilibili.com/*",

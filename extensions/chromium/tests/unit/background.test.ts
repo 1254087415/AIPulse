@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { cleanTrackingParams } from '../../src/utils';
 import type { FoundLink, SubmitResult } from '../../src/types';
+import type { DebuggerHoverResult } from '../../src/platform/douyin-debugger';
 
 type Listener = (...args: unknown[]) => unknown;
 
@@ -53,6 +54,12 @@ interface MockChrome {
   notifications: {
     create: Mock<(options: unknown) => Promise<string>>;
   };
+  debugger: {
+    attach: Mock<(target: chrome.debugger.Debuggee, version: string) => Promise<void>>;
+    detach: Mock<(target: chrome.debugger.Debuggee) => Promise<void>>;
+    sendCommand: Mock<(target: chrome.debugger.Debuggee, method: string, params?: Record<string, unknown>) => Promise<unknown>>;
+    onEvent: MockEvent;
+  };
 }
 
 describe('background helpers', () => {
@@ -103,6 +110,12 @@ describe('background message handlers', () => {
       },
       notifications: {
         create: vi.fn(async () => 'notification-id'),
+      },
+      debugger: {
+        attach: vi.fn(),
+        detach: vi.fn(),
+        sendCommand: vi.fn(),
+        onEvent: createMockEvent(),
       },
     };
 
@@ -638,3 +651,443 @@ describe('background message handlers', () => {
     expect(getTab999).toHaveBeenCalledWith({ links: [] });
   });
 });
+
+// Module-level mock so vi.mock hoisting can reference it.
+// vi.hoisted() keeps dispatchTrustedHoverMock synchronized with vi.mock's
+// factory across vi.resetModules() calls.
+const { mockFn: dispatchTrustedHoverMock } = vi.hoisted(() => {
+  const fn = vi.fn();
+  return { mockFn: fn };
+});
+
+vi.mock('../../src/platform/douyin-debugger', () => ({
+  dispatchTrustedHover: dispatchTrustedHoverMock,
+}));
+
+describe('DOUYIN_DEBUGGER_HOVER message handler', () => {
+  let mockChrome: MockChrome;
+  let backgroundModule: typeof import('../../src/background');
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubGlobal('fetch', vi.fn());
+
+    const sessionStore: Record<string, unknown> = {};
+
+    dispatchTrustedHoverMock.mockReset();
+
+    mockChrome = {
+      runtime: {
+        onMessage: createMockEvent(),
+        onInstalled: createMockEvent(),
+        connectNative: vi.fn((name: string) => {
+          void name;
+          return createMockPort();
+        }),
+      },
+      storage: {
+        local: {
+          get: vi.fn((keys: string, callback: (result: Record<string, unknown>) => void) => {
+            callback({ [keys]: sessionStore[keys] });
+          }),
+          set: vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+            Object.assign(sessionStore, items);
+            if (callback) callback();
+          }),
+        },
+      },
+      contextMenus: {
+        create: vi.fn(),
+        removeAll: vi.fn((callback?: () => void) => callback && callback()),
+        onClicked: createMockEvent(),
+      },
+      tabs: {
+        onRemoved: createMockEvent(),
+        onUpdated: createMockEvent(),
+      },
+      notifications: {
+        create: vi.fn(async () => 'notification-id'),
+      },
+      debugger: {
+        attach: vi.fn(),
+        detach: vi.fn(),
+        sendCommand: vi.fn(),
+        onEvent: createMockEvent(),
+      },
+    };
+
+    // Stub chrome BEFORE importing background so the module registers its
+    // listener on the mock's onMessage (not the real chrome) and subsequent
+    // dispatch() calls reach the registered listener.
+    vi.stubGlobal('chrome', mockChrome as unknown as typeof chrome);
+
+    backgroundModule = await import('../../src/background');
+
+    // Clear per-tab throttle map between tests to prevent cross-test pollution
+    Object.keys(backgroundModule.DEBUGGER_TAB_THROTTLE_MAP).forEach((k) => delete backgroundModule.DEBUGGER_TAB_THROTTLE_MAP[k]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('calls dispatchTrustedHover with correct api for valid douyin.com https request (no tabId in message)', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    dispatchTrustedHoverMock.mockResolvedValue({ captured: true, fallback: false });
+
+    // Message does NOT include tabId field - content script cannot know its own tabId
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    // Yield to the event loop so the async handler runs before we assert
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await vi.waitFor(() => expect(dispatchTrustedHoverMock).toHaveBeenCalled());
+
+    // Verify dispatchTrustedHover was called with sender.tab.id (not any message.tabId)
+    expect(dispatchTrustedHoverMock).toHaveBeenCalledWith(
+      '123',
+      { x: 100, y: 200 },
+      expect.any(Object)
+    );
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, captured: true, fallback: false });
+  });
+
+  it('ignores malicious tabId field and uses sender.tab.id as target', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    dispatchTrustedHoverMock.mockResolvedValue({ captured: true, fallback: false });
+
+    // Attacker tries to trick background into targeting tab 999, but we ignore message.tabId
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', tabId: 999, point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    // Yield to the event loop so the async handler runs before we assert
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await vi.waitFor(() => expect(dispatchTrustedHoverMock).toHaveBeenCalled());
+
+    // Must use sender.tab.id (123), NOT the malicious message.tabId (999)
+    expect(dispatchTrustedHoverMock).toHaveBeenCalledWith(
+      '123',
+      { x: 100, y: 200 },
+      expect.any(Object)
+    );
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, captured: true, fallback: false });
+  });
+
+  it('returns error when sender.tab is missing', async () => {
+    const sendResponse = vi.fn();
+    const sender = {};
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid sender' });
+    expect(dispatchTrustedHoverMock).not.toHaveBeenCalled();
+  });
+
+  it('returns error when sender.tab.id is not a number', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: '123', url: 'https://www.douyin.com/notice' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid sender' });
+  });
+
+  it('returns error when sender.tab.url is not www.douyin.com', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.bilibili.com/video/123' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid url' });
+  });
+
+  it('returns error when sender.tab.url hostname has wrong www prefix', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://douyin.com/notice' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid url' });
+  });
+
+  it('returns error when sender.tab.url is not https', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'http://www.douyin.com/notice' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid url' });
+  });
+
+  it('returns error when point.x is not finite', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: NaN, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid point' });
+  });
+
+  it('returns error when point.y is negative', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: -5 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid point' });
+  });
+
+  it('returns error when point has negative x and y', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: -1, y: -2 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'invalid point' });
+  });
+
+  it('returns fallback:true when dispatchTrustedHover returns fallback:true', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    dispatchTrustedHoverMock.mockResolvedValue({ captured: false, fallback: true });
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, captured: false, fallback: true });
+  });
+
+  it('returns captured:false fallback:false when dispatchTrustedHover returns captured:false fallback:false', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    dispatchTrustedHoverMock.mockResolvedValue({ captured: false, fallback: false });
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, captured: false, fallback: false });
+  });
+
+  it('returns error when dispatchTrustedHover throws', async () => {
+    const sendResponse = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    dispatchTrustedHoverMock.mockRejectedValue(new Error('debugger connection failed'));
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse
+    );
+
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalled());
+    // Error message should not leak the exception object details
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, fallback: false, error: 'debugger error' });
+  });
+
+  it('rejects concurrent DOUYIN_DEBUGGER_HOVER for same tab (per-tab throttle)', async () => {
+    const sendResponse1 = vi.fn();
+    const sendResponse2 = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    // First request starts and is still pending (dispatchTrustedHover not yet resolved)
+    dispatchTrustedHoverMock.mockImplementation(async () => {
+      // Simulate a long-running operation by never resolving
+      return new Promise(() => {});
+    });
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse1
+    );
+
+    await vi.waitFor(() => expect(dispatchTrustedHoverMock).toHaveBeenCalledTimes(1));
+
+    // Second concurrent request for the SAME tab should be rejected immediately
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 150, y: 250 } },
+      sender,
+      sendResponse2
+    );
+
+    await vi.waitFor(() => expect(sendResponse2).toHaveBeenCalled());
+    expect(sendResponse2).toHaveBeenCalledWith({ ok: false, fallback: true, error: 'debugger busy' });
+
+    // First request should still be pending (no response yet)
+    expect(sendResponse1).not.toHaveBeenCalled();
+  });
+
+  it('allows concurrent DOUYIN_DEBUGGER_HOVER for different tabs (no throttle cross-tab)', async () => {
+    const sendResponse1 = vi.fn();
+    const sendResponse2 = vi.fn();
+    const senderTab123 = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+    const senderTab456 = {
+      tab: { id: 456, url: 'https://www.douyin.com/notice' },
+    };
+
+    dispatchTrustedHoverMock.mockResolvedValue({ captured: true, fallback: false });
+
+    // Two requests for DIFFERENT tabs should both proceed
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      senderTab123,
+      sendResponse1
+    );
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 150, y: 250 } },
+      senderTab456,
+      sendResponse2
+    );
+
+    await vi.waitFor(() => expect(dispatchTrustedHoverMock).toHaveBeenCalledTimes(2));
+    expect(dispatchTrustedHoverMock).toHaveBeenNthCalledWith(
+      1,
+      '123',
+      { x: 100, y: 200 },
+      expect.any(Object)
+    );
+    expect(dispatchTrustedHoverMock).toHaveBeenNthCalledWith(
+      2,
+      '456',
+      { x: 150, y: 250 },
+      expect.any(Object)
+    );
+  });
+
+  it('allows new request for same tab after previous completes (lock released in finally)', async () => {
+    const sendResponse1 = vi.fn();
+    const sendResponse2 = vi.fn();
+    const sender = {
+      tab: { id: 123, url: 'https://www.douyin.com/notice' },
+    };
+
+    // First request resolves immediately
+    dispatchTrustedHoverMock.mockResolvedValue({ captured: true, fallback: false });
+
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 100, y: 200 } },
+      sender,
+      sendResponse1
+    );
+
+    await vi.waitFor(() => expect(sendResponse1).toHaveBeenCalledWith({ ok: true, captured: true, fallback: false }));
+
+    // Second request for the SAME tab should now succeed (lock was released)
+    mockChrome.runtime.onMessage.dispatch(
+      { type: 'DOUYIN_DEBUGGER_HOVER', point: { x: 150, y: 250 } },
+      sender,
+      sendResponse2
+    );
+
+    await vi.waitFor(() => expect(sendResponse2).toHaveBeenCalledWith({ ok: true, captured: true, fallback: false }));
+    expect(dispatchTrustedHoverMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Integration-style tests for DOUYIN_DEBUGGER_HOVER that exercise the real
+ * dispatchTrustedHover path with real chrome.debugger.* mocks.
+ *
+ * These verify the DebuggerApi adapter inside handleMessage correctly:
+ *  - converts sender.tab.id (string) to chrome.debugger tabId (number)
+ *  - calls attach({tabId:123},'1.3')
+ *  - calls sendCommand({tabId:123},'Input.dispatchMouseEvent',{type:'mouseMoved',x:10,y:20,...})
+ *  - calls detach({tabId:123})
+ *  - returns fallback:true when chrome.debugger.attach rejects with a conflict error
+ */
