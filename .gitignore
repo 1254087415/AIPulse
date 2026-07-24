@@ -199,6 +199,7 @@ skills-lock.json
 # Playwright MCP / agent tool artifacts
 .playwright-mcp/
 .agnes/
+.codex/
 
 # Vite / Vitest caches
 .vite/
