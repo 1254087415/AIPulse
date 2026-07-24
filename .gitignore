@@ -17,6 +17,7 @@ eggs/
 lib/
 !web/src/lib/
 !web/src/lib/format.ts
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
