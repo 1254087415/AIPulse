@@ -305,3 +305,120 @@ async def get_followed_up_health_route(
             "is_active": record.is_active,
         },
     }
+
+
+@router.get("/{followed_up_id}/overview")
+async def get_followed_up_overview_route(
+    followed_up_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Phase 7 v0.3 spec §G8 — UP主详情页数据汇总。
+
+    聚合：基础信息 + health + 最近的 10 个 job + 最近的 10 个 learning event
+    + 最近 10 个 collection。前端 single-page 渲染。
+    """
+    from sqlalchemy import desc, select
+
+    from aipulse.models.followed_up_collections import FollowedUpCollection
+    from aipulse.models.learning_events import LearningEvent
+    from aipulse.models.summary_jobs import SummaryJob
+
+    followed_repo = SqlAlchemyFollowedUpRepository(session)
+    record = await followed_repo.find_by_id(followed_up_id)
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="FollowedUp not found")
+
+    health = {
+        "health": record.health,
+        "last_checked_at": record.last_checked_at.isoformat() if record.last_checked_at else None,
+        "last_error": record.last_error,
+        "failed_at": record.failed_at.isoformat() if record.failed_at else None,
+        "is_active": record.is_active,
+        "fetch_interval_minutes": record.fetch_interval_minutes,
+        "status": record.status,
+    }
+
+    # Hotspots → job 关联（hotspot.followed_up_id == followed_up_id）
+    from aipulse.hotspot.models import Hotspot
+
+    stmt_jobs = (
+        select(SummaryJob)
+        .join(Hotspot, Hotspot.content_id == SummaryJob.video_id, isouter=True)
+        .where(
+            (Hotspot.followed_up_id == followed_up_id)
+            | (SummaryJob.video_id.in_(
+                select(Hotspot.content_id).where(Hotspot.followed_up_id == followed_up_id)
+            ))
+        )
+        .order_by(desc(SummaryJob.created_at))
+        .limit(10)
+    )
+    jobs = (await session.execute(stmt_jobs)).scalars().all()
+    recent_jobs: list[dict[str, Any]] = [
+        {
+            "id": j.id,
+            "video_id": j.video_id,
+            "status": j.status,
+            "title": j.title,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            "error": j.error,
+            "note_path": j.note_path,
+        }
+        for j in jobs
+    ]
+
+    stmt_events = (
+        select(LearningEvent)
+        .where(LearningEvent.followed_up_id == followed_up_id)
+        .order_by(desc(LearningEvent.scheduled_at))
+        .limit(10)
+    )
+    events = (await session.execute(stmt_events)).scalars().all()
+    recent_events: list[dict[str, Any]] = [
+        {
+            "id": e.id,
+            "title": e.title,
+            "scheduled_at": e.scheduled_at.isoformat() if e.scheduled_at else None,
+            "learning_status": e.learning_status,
+            "summary_note_path": e.summary_note_path,
+            "platform": e.platform,
+        }
+        for e in events
+    ]
+
+    stmt_cols = (
+        select(FollowedUpCollection)
+        .where(FollowedUpCollection.followed_up_id == followed_up_id)
+        .order_by(desc(FollowedUpCollection.created_at))
+        .limit(10)
+    )
+    collections = (await session.execute(stmt_cols)).scalars().all()
+    recent_collections: list[dict[str, Any]] = [
+        {
+            "id": c.id,
+            "title": c.title,
+            "platform_collection_id": c.platform_collection_id,
+            "description": c.description,
+            "video_count": c.video_count,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in collections
+    ]
+
+    await session.commit()
+    return {
+        "success": True,
+        "data": {
+            "id": record.id,
+            "platform": record.platform,
+            "uid": record.uid,
+            "display_name": record.display_name,
+            "profile_url": record.profile_url,
+            "health": health,
+            "config": record.config or {},
+            "recent_jobs": recent_jobs,
+            "recent_learning_events": recent_events,
+            "recent_collections": recent_collections,
+        },
+    }

@@ -158,6 +158,77 @@ async def list_jobs_route(
     }
 
 
+@router.post("/job/{job_id}/retry", status_code=202)
+async def retry_job_route(
+    job_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Retry a failed/timeout job by enqueuing a fresh run for the same video.
+
+    Creates a NEW SummaryJob (video_id 不变) so DB 留有 retry trail。
+    若旧 job 已 completed/failed 之外的 status（如 queued/running），返回 409。
+    """
+    from sqlalchemy import select
+
+    from aipulse.models.summary_jobs import (
+        JOB_STATUS_COMPLETED,
+        JOB_STATUS_FAILED,
+        JOB_STATUS_PARTIAL,
+        JOB_STATUS_QUEUED,
+        JOB_STATUS_RUNNING,
+        JOB_STATUS_TIMEOUT,
+        SummaryJob,
+    )
+
+    repo = SqlAlchemySummaryJobRepository(session)
+    old = await repo.find_by_id(job_id)
+    await session.commit()
+    if old is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    reusable = {JOB_STATUS_FAILED, JOB_STATUS_TIMEOUT, JOB_STATUS_PARTIAL, JOB_STATUS_COMPLETED}
+    if old.status not in reusable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"job 处于 {old.status}，不能 retry",
+        )
+
+    from aipulse.summarizers.queue import get_queue
+
+    queue = get_queue()
+    await queue.start()
+
+    # 复用 enqueue，但先直接复用 record 已经是 queued state →
+    # 我们手动写一条新 row + push 到 queue
+    repo2 = SqlAlchemySummaryJobRepository(session)
+    record = await repo2.create(
+        video_id=old.video_id,
+        title=old.title or "",
+        up_name=old.up_name or "",
+    )
+    if old.hotspot_id:
+        await repo2.annotate(record.id, hotspot_id=old.hotspot_id)
+    await session.commit()
+
+    submission = await queue.enqueue(
+        repo2,
+        video_id=old.video_id,
+        title=old.title or "",
+        up_name=old.up_name or "",
+    )
+    # overwrite the job_id with the freshly-created one (queue already used it)
+    # Actually submission.job_id == record.id at this point
+    return {
+        "success": True,
+        "data": {
+            "new_job_id": submission.job_id,
+            "old_job_id": job_id,
+            "video_id": old.video_id,
+            "reused": False,
+        },
+    }
+
+
 @router.get("/job/{job_id}")
 async def get_job_route(
     job_id: str,
