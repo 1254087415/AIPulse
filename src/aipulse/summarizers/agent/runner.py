@@ -125,15 +125,20 @@ async def run_summary_pipeline(
 def _extract_step(result: dict, tool_name: str, field: str) -> str | None:
     """Pull a field out of the tool output inside intermediate_steps."""
     for action, output in result.get("intermediate_steps", []):
-        if action.tool == tool_name:
-            try:
-                parsed = json.loads(output) if isinstance(output, str) else output
-                if isinstance(parsed, dict):
-                    val = parsed.get(field)
-                    if val is not None:
-                        return str(val)
-            except (json.JSONDecodeError, AttributeError):
-                return None
+        try:
+            action_tool = getattr(action, "tool", None)
+        except AttributeError:  # pragma: no cover  # defensive — getattr default prevents this
+            continue
+        if action_tool != tool_name:
+            continue
+        try:
+            parsed = json.loads(output) if isinstance(output, str) else output
+            if isinstance(parsed, dict):
+                val = parsed.get(field)
+                if val is not None:
+                    return str(val)
+        except (json.JSONDecodeError, AttributeError):
+            return None
     return None
 
 
