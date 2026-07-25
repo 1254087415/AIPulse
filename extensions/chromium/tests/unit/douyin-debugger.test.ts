@@ -12,13 +12,16 @@ type MockApi = {
   attach: ReturnType<typeof vi.fn>;
   sendCommand: ReturnType<typeof vi.fn>;
   detach: ReturnType<typeof vi.fn>;
+  isTabBeingDebugged: ReturnType<typeof vi.fn>;
 };
 
-function makeMockApi(): MockApi {
+function makeMockApi(overrides: Partial<MockApi> = {}): MockApi {
   return {
-    attach: vi.fn(),
-    sendCommand: vi.fn(),
-    detach: vi.fn(),
+    attach: vi.fn().mockResolvedValue(undefined),
+    sendCommand: vi.fn().mockResolvedValue(undefined),
+    detach: vi.fn().mockResolvedValue(undefined),
+    isTabBeingDebugged: vi.fn().mockResolvedValue(false),
+    ...overrides,
   };
 }
 
@@ -814,5 +817,72 @@ describe('dispatchTrustedHover', () => {
     // Should eventually succeed despite detach always failing
     expect(result.captured).toBe(true);
     expect(result.fallback).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Pre-attach conflict detection (chrome.debugger.getTargets)
+  // -------------------------------------------------------------------------
+  it('returns fallback=true when isTabBeingDebugged reports true (foreign debugger present)', async () => {
+    const api = makeMockApi({
+      isTabBeingDebugged: vi.fn().mockResolvedValue(true),
+    });
+    const result = await dispatchTrustedHover('tab1', { x: 100, y: 100 }, {
+      api: api as never,
+      captureAttempt: vi.fn().mockResolvedValue({ captured: true }),
+      wait: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(result.captured).toBe(false);
+    expect(result.fallback).toBe(true);
+    // attach/sendCommand/detach MUST NOT be called — we never perturb a
+    // foreign debugger session.
+    expect(api.attach).not.toHaveBeenCalled();
+    expect(api.sendCommand).not.toHaveBeenCalled();
+    expect(api.detach).not.toHaveBeenCalled();
+    // isTabBeingDebugged consulted exactly once — retry must not happen when
+    // a foreign debugger is present (it would just keep rejecting).
+    expect(api.isTabBeingDebugged).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to long-link path when isTabBeingDebugged rejects', async () => {
+    const api = makeMockApi({
+      isTabBeingDebugged: vi.fn().mockRejectedValue(new Error('API error')),
+    });
+    api.attach.mockRejectedValueOnce(new Error('silent'));
+
+    const result = await dispatchTrustedHover('tab1', { x: 100, y: 100 }, {
+      api: api as never,
+      captureAttempt: vi.fn().mockResolvedValue({ captured: true }),
+      wait: vi.fn().mockResolvedValue(undefined),
+      maxAttempts: 1,
+    });
+    // Even when getTargets fails, the rest of the dispatcher still runs.
+    // The attach rejection is non-conflict → exhausted without captured → fallback=false.
+    expect(api.isTabBeingDebugged).toHaveBeenCalled();
+    expect(result.captured).toBe(false);
+    expect(result.fallback).toBe(false);
+  });
+
+  it('consults isTabBeingDebugged exactly once on success', async () => {
+    const api = makeMockApi();
+    api.sendCommand.mockResolvedValueOnce(undefined);
+    await dispatchTrustedHover('tab1', { x: 100, y: 100 }, {
+      api: api as never,
+      captureAttempt: vi.fn().mockResolvedValue({ captured: true }),
+      wait: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(api.isTabBeingDebugged).toHaveBeenCalledTimes(1);
+  });
+
+  it('consults isTabBeingDebugged on every retry when attach keeps failing non-conflict', async () => {
+    const api = makeMockApi();
+    api.attach.mockRejectedValue(new Error('network blip'));
+    await dispatchTrustedHover('tab1', { x: 100, y: 100 }, {
+      api: api as never,
+      captureAttempt: vi.fn().mockResolvedValue({ captured: true }),
+      wait: vi.fn().mockResolvedValue(undefined),
+      maxAttempts: 3,
+    });
+    // 3 attach attempts → 3 pre-attach probes.
+    expect(api.isTabBeingDebugged).toHaveBeenCalledTimes(3);
   });
 });

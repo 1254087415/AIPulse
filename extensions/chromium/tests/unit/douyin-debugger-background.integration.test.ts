@@ -51,6 +51,7 @@ interface DebuggerCalls {
   attach: Array<[chrome.debugger.Debuggee, string]>;
   sendCommand: Array<[chrome.debugger.Debuggee, string, Record<string, unknown> | undefined]>;
   detach: Array<[chrome.debugger.Debuggee]>;
+  getTargets: Array<[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,7 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
       attach: Mock<(target: chrome.debugger.Debuggee, version: string) => Promise<void>>;
       sendCommand: Mock<(target: chrome.debugger.Debuggee, method: string, params?: Record<string, unknown>) => Promise<unknown>>;
       detach: Mock<(target: chrome.debugger.Debuggee) => Promise<void>>;
+      getTargets: Mock<() => Promise<chrome.debugger.TargetInfo[]>>;
     };
     calls: DebuggerCalls;
   };
@@ -70,6 +72,8 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
     runtime: {
       onMessage: MockEvent;
       onInstalled: MockEvent;
+      onStartup: MockEvent;
+      id: string;
       connectNative: Mock<(name: string) => chrome.runtime.Port>;
     };
     storage: {
@@ -90,17 +94,22 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
     notifications: {
       create: Mock<(options: unknown) => Promise<string>>;
     };
+    action: {
+      setBadgeText: Mock<(details?: unknown) => Promise<void>>;
+      setBadgeBackgroundColor: Mock<(details: unknown) => Promise<void>>;
+    };
     debugger: {
       attach: Mock<(target: chrome.debugger.Debuggee, version: string) => Promise<void>>;
       detach: Mock<(target: chrome.debugger.Debuggee) => Promise<void>>;
       sendCommand: Mock<(target: chrome.debugger.Debuggee, method: string, params?: Record<string, unknown>) => Promise<unknown>>;
+      getTargets: Mock<() => Promise<chrome.debugger.TargetInfo[]>>;
       onEvent: MockEvent;
     };
   };
   let backgroundModule: typeof import('../../src/background');
 
   function createDebuggerMock(): typeof debuggerMock {
-    const calls: DebuggerCalls = { attach: [], sendCommand: [], detach: [] };
+    const calls: DebuggerCalls = { attach: [], sendCommand: [], detach: [], getTargets: [] };
     return {
       mock: {
         attach: vi.fn(async (target: chrome.debugger.Debuggee, version: string) => {
@@ -111,6 +120,12 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
         }),
         detach: vi.fn(async (target: chrome.debugger.Debuggee) => {
           calls.detach.push([target]);
+        }),
+        // Default: no foreign debugger is attached to our tab.
+        // Tests that need a foreign-debugger scenario override this.
+        getTargets: vi.fn(async () => {
+          calls.getTargets.push([]);
+          return [] as chrome.debugger.TargetInfo[];
         }),
       },
       calls,
@@ -132,6 +147,8 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
       runtime: {
         onMessage: createMockEvent(),
         onInstalled: createMockEvent(),
+        onStartup: createMockEvent(),
+        id: 'aipulse-self',
         connectNative: vi.fn((name: string) => {
           void name;
           return createMockPort();
@@ -157,6 +174,10 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
         onRemoved: createMockEvent(),
         onUpdated: createMockEvent(),
       },
+      action: {
+        setBadgeText: vi.fn(async () => undefined),
+        setBadgeBackgroundColor: vi.fn(async () => undefined),
+      },
       notifications: {
         create: vi.fn(async () => 'notification-id'),
       },
@@ -164,6 +185,7 @@ describe('DOUYIN_DEBUGGER_HOVER with real dispatchTrustedHover and chrome.debugg
         attach: debuggerMock.mock.attach,
         detach: debuggerMock.mock.detach,
         sendCommand: debuggerMock.mock.sendCommand,
+        getTargets: debuggerMock.mock.getTargets,
         onEvent: createMockEvent(),
       },
     };
