@@ -23,7 +23,14 @@ _SECRET_KEYS = {
 
 
 class AppSettings(BaseSettings):
-    """Global application settings loaded from environment variables."""
+    """Global application settings loaded from environment variables.
+
+    Load order (later wins):
+      1. Built-in defaults declared on the model.
+      2. ``.env`` file in the working directory.
+      3. ``data/settings.json`` produced by ``AppSettings.save()`` so the
+         UI's PATCH /api/settings call persists across restarts.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -99,9 +106,45 @@ class AppSettings(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure data directories exist after initialization."""
+        # Guard against recursive re-entry: Pydantic-settings sometimes
+        # re-invokes ``__init__``/``model_post_init`` while resolving
+        # source values, which would otherwise attempt to merge persisted
+        # JSON state into an already-merging instance and blow the stack.
+        if getattr(self, "_aipulse_post_init_done", False):
+            return
+        object.__setattr__(self, "_aipulse_post_init_done", True)
+
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.download_dir.mkdir(parents=True, exist_ok=True)
         self.scripts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Reload from the persisted JSON if it exists, so changes made via
+        # PATCH /api/settings survive process restarts.
+        persisted = self._load_persisted()
+        if persisted:
+            try:
+                # Re-construct via model_validate so Pydantic re-runs the field
+                # validators and converts Path / SecretStr etc. correctly.
+                merged = self.model_validate({**self.model_dump(), **persisted})
+                object.__setattr__(self, "__dict__", merged.__dict__)
+            except Exception:  # noqa: BLE001 — defensive: never block init
+                logger.exception("Failed to merge persisted settings")
+
+    def _load_persisted(self) -> dict[str, Any]:
+        """Read data/settings.json if present and return only known keys."""
+        path = self.settings_path
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.exception("Failed to read persisted settings at %s", path)
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        # Drop unknown keys so we don't re-introduce removed fields.
+        valid = set(self.model_dump().keys())
+        return {k: v for k, v in raw.items() if k in valid}
 
     @property
     def scripts_dir(self) -> Path:
@@ -140,8 +183,14 @@ class AppSettings(BaseSettings):
         return resolved
 
     def save(self) -> None:
-        """Persist runtime overrides to a JSON file under data/settings.json."""
-        payload = self.to_client_dict()
+        """Persist runtime overrides to a JSON file under data/settings.json.
+
+        Non-secret overrides and non-empty secret values are written so they
+        survive process restarts. Empty secret values are skipped so a PATCH
+        with no secret field does not overwrite a previously persisted value
+        (CLAUDE.md: 保存时必须保留原有 secrets).
+        """
+        full = self.to_client_dict()
         # Only persist keys that may be changed at runtime.
         persist_keys = {
             "llm_provider",
@@ -169,7 +218,15 @@ class AppSettings(BaseSettings):
             "ytdlp_user_agent",
             "http_user_agent_mobile",
         }
-        payload = {key: payload[key] for key in persist_keys if key in payload}
+        payload = {key: full[key] for key in persist_keys if key in full}
+        # Secrets: persist only when the user explicitly set a non-empty value
+        # via PATCH /api/settings. Empty secrets are omitted so .env remains
+        # the source of truth for unset secrets and a partial PATCH cannot
+        # silently clear a previously persisted secret.
+        for key in _SECRET_KEYS:
+            value = full.get(key)
+            if value:
+                payload[key] = value
         try:
             self.settings_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, default=str),
@@ -200,30 +257,40 @@ class AppSettings(BaseSettings):
         return result
 
     def update(self, **changes: Any) -> "AppSettings":
-        """Return a new settings instance with the given changes applied."""
-        current = self.model_dump()
+        """Apply changes in place and return self.
+
+        Mutating the existing instance avoids re-running ``model_post_init``
+        on the new instance (which would re-merge persisted values from
+        ``data/settings.json`` and silently overwrite any caller-provided
+        changes that conflict with on-disk state).
+        """
+        # Validate security-sensitive paths before mutating.
+        new_script = changes.get("wechat_send_script")
+        if new_script:
+            self.validate_script_path(new_script, self.data_dir)
+
         for key in _SECRET_KEYS:
-            new_value = changes.get(key)
-            if new_value and not self._is_masked_secret(new_value):
-                current[key] = new_value
-            else:
-                # Preserve the existing secret when the incoming value is empty,
-                # masked, or omitted. This prevents the UI from clearing secrets
-                # when it sends back a masked placeholder.
-                current[key] = self._get_secret_value(key)
+            if key in changes:
+                new_value = changes[key]
+                if new_value and not self._is_masked_secret(new_value):
+                    self._set_secret_value(key, str(new_value))
+                # else: preserve existing secret when value is empty/masked/missing
         for key, value in changes.items():
             if key not in _SECRET_KEYS:
-                current[key] = value
-        # Validate security-sensitive paths before constructing the new instance.
-        new_script = current.get("wechat_send_script")
-        if new_script:
-            self.validate_script_path(new_script, Path(current.get("data_dir", self.data_dir)))
-        # Ensure Path fields are converted back to Path objects.
-        path_keys = {"data_dir", "download_dir", "obsidian_vault_path"}
-        for key in path_keys:
-            if key in current and not isinstance(current[key], Path):
-                current[key] = Path(current[key])
-        return AppSettings(**current)
+                if key in {"data_dir", "download_dir", "obsidian_vault_path"}:
+                    object.__setattr__(self, key, Path(value) if value else Path("."))
+                else:
+                    object.__setattr__(self, key, value)
+        return self
+
+    def _set_secret_value(self, key: str, value: str) -> None:
+        """Replace the SecretStr field on a frozen model without re-validation."""
+        current = getattr(self, key, None)
+        if isinstance(current, SecretStr):
+            current = SecretStr(value)
+            object.__setattr__(self, key, current)
+        else:
+            object.__setattr__(self, key, SecretStr(value))
 
     def validate_obsidian_vault(self) -> None:
         """Validate that the configured Obsidian vault path exists."""

@@ -3,6 +3,7 @@
 import os
 from collections.abc import AsyncGenerator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,3 +55,17 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     await reset_db()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
         yield http_client
+
+
+@pytest.fixture(autouse=True)
+def isolate_data_dir(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route AppSettings.data_dir to a fresh tmp directory per test.
+
+    Without this, tests that touch AppSettings would read the developer's
+    real ``data/settings.json`` (and write to it), causing state to leak
+    across tests and silently overriding monkeypatched env vars.
+    """
+    test_dir = tmp_path / "data"
+    monkeypatch.setenv("DATA_DIR", str(test_dir))
+    monkeypatch.setenv("DOWNLOAD_DIR", str(test_dir / "downloads"))
+    get_settings.cache_clear()

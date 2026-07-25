@@ -1,10 +1,12 @@
 """Direct unit tests for the hotspot web routes."""
 
 from datetime import UTC, date, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
+from aipulse.hotspot.schemas import GenerateDigestRequest
 from aipulse.web.routes import (
     archive_hotspot_route,
     create_keyword_route,
@@ -219,13 +221,55 @@ async def test_list_digests_route_returns_envelope() -> None:
 
 @pytest.mark.unit
 async def test_generate_digest_route_returns_envelope() -> None:
+    """Generate today's digest (no body) — service called with session + target_date."""
+    from datetime import date as _date
+
     session = MagicMock()
+    # Existence check (async): returns no duplicate
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
     digest = _make_digest_mock("d1")
-    with patch("aipulse.web.routes.generate_digest_service", return_value=digest) as mock:
+    with patch("aipulse.web.routes.generate_digest_service", AsyncMock(return_value=digest)) as mock:
         result = await generate_digest_route(session)
-    mock.assert_awaited_once_with(session)
+    mock.assert_awaited_once()
+    _, kwargs = mock.call_args
+    assert kwargs["target_date"] == _date.today()
     assert result["success"] is True
     assert result["data"].id == "d1"
+
+
+@pytest.mark.unit
+async def test_generate_digest_route_returns_409_when_duplicate() -> None:
+    """If a digest already exists for the target date, return 409 with existing record."""
+    from datetime import date as _date
+
+    session = MagicMock()
+    existing = _make_digest_mock("existing-1")
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing)))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_digest_route(
+            session, payload=GenerateDigestRequest(target_date=_date(2026, 7, 25))
+        )
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["error"] == "digest_exists"
+    assert exc_info.value.detail["date"] == "2026-07-25"
+
+
+@pytest.mark.unit
+async def test_generate_digest_route_accepts_custom_date() -> None:
+    """Body with target_date should be passed through to service."""
+    from datetime import date as _date
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    digest = _make_digest_mock("d2")
+    with patch("aipulse.web.routes.generate_digest_service", AsyncMock(return_value=digest)) as mock:
+        result = await generate_digest_route(
+            session, payload=GenerateDigestRequest(target_date=_date(2026, 7, 20))
+        )
+    _, kwargs = mock.call_args
+    assert kwargs["target_date"] == _date(2026, 7, 20)
+    assert result["data"].id == "d2"
 
 
 @pytest.mark.unit

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aipulse.hotspot.schemas import (
     DailyDigestOut,
+    GenerateDigestRequest,
     HotspotOut,
     KeywordCreate,
     KeywordOut,
@@ -54,8 +55,11 @@ from aipulse.hotspot.service import (
 from aipulse.hotspot.service import (
     update_source as update_source_service,
 )
+from aipulse.core.config import get_settings as get_global_settings
+from aipulse.core.config import reset_settings as reset_global_settings
 from aipulse.store.database import get_session
 from aipulse.store.models import now_utc
+from aipulse.web.schemas import SettingsResponse, SettingsUpdate
 from aipulse.web.sse import sse_manager
 
 router = APIRouter()
@@ -242,9 +246,33 @@ async def get_latest_digest_route(
 @router.post("/digests/generate")
 async def generate_digest_route(
     session: Annotated[AsyncSession, Depends(get_session)],
+    payload: GenerateDigestRequest | None = None,
 ) -> dict[str, Any]:
-    """Generate today's digest from current hotspots."""
-    digest = await generate_digest_service(session)
+    """Generate today's digest from current hotspots.
+
+    Body (optional):
+        {"date": "2026-07-25"} — defaults to today. If a digest already exists
+        for that date, return 409 with the existing record (idempotent UX).
+    """
+    from datetime import date as _date
+    from sqlalchemy import select
+
+    from aipulse.hotspot.models import DailyDigest
+
+    target_date = payload.target_date if payload and payload.target_date else _date.today()
+    stmt = select(DailyDigest).where(DailyDigest.date == target_date)
+    result = await session.execute(stmt)
+    dup = result.scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "digest_exists",
+                "date": target_date.isoformat(),
+                "existing": DailyDigestOut.model_validate(dup).model_dump(mode="json"),
+            },
+        )
+    digest = await generate_digest_service(session, target_date=target_date)
     return {"success": True, "data": DailyDigestOut.model_validate(digest)}
 
 
@@ -256,3 +284,58 @@ async def hotspots_sse(request: Request) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/settings")
+async def get_settings_route() -> dict[str, Any]:
+    """Return current AppSettings, grouped by section, with secrets masked."""
+    from aipulse.web.settings_map import build_settings_response
+
+    settings = get_global_settings()
+    return {"success": True, "data": build_settings_response(settings)}
+
+
+@router.patch("/settings")
+async def patch_settings_route(payload: SettingsUpdate) -> dict[str, Any]:
+    """Apply a partial update to AppSettings.
+
+    Semantics:
+      * Empty / masked secrets are preserved (UI can safely round-trip
+        masked placeholders without clearing the underlying value).
+      * New secret values overwrite the existing secret.
+      * Non-secret fields overwrite.
+      * Updated value is validated (e.g. obsidian_vault_path must exist) and
+        persisted to data/settings.json via AppSettings.save().
+      * After a successful update, the cached settings singleton is reset
+        so the next request reads the new values.
+    """
+    from pathlib import Path
+
+    from aipulse.web.settings_map import build_settings_response, update_settings
+
+    current = get_global_settings()
+    changes = payload.model_dump(exclude_unset=True)
+    updated = update_settings(current, changes)
+
+    # Only validate the obsidian vault path when the caller explicitly changed
+    # it. Other PATCH calls (kimi base url, wechat fields, etc.) should not
+    # fail just because the persisted vault hasn't been set up yet on this
+    # machine — that's a separate concern.
+    if "obsidian_vault_path" in changes and updated.obsidian_vault_path:
+        if not updated.obsidian_vault_path.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Obsidian vault path does not exist: {updated.obsidian_vault_path}",
+            )
+
+    try:
+        updated.save()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to persist settings: {exc}") from exc
+
+    # Do NOT reset_global_settings() here: AppSettings.update() mutates in
+    # place and the cached singleton already reflects the new values.
+    # Resetting would discard the in-memory update (e.g. secrets that are
+    # not persisted to disk) and force the next GET to reconstruct an empty
+    # instance from settings.json alone.
+    return {"success": True, "data": build_settings_response(updated)}
