@@ -19,7 +19,7 @@ async def create_reminder(
     due_date: str,
     notes: str = "",
     *,
-    list_name: str = "工作学习",
+    list_name: str = "学习",
     executor_timeout_s: float = 5.0,
 ) -> str:
     """Create an Apple Reminders entry; return the Reminder's ID.

@@ -200,24 +200,26 @@ class TestArchiveThreeWay:
         original_sn = agent_tools.send_notification
         agent_tools.send_notification = type("NoCoroTool", (), {})()
         try:
-            with patch(
-                "aipulse.summarizers.agent.tools.get_settings",
-                return_value=settings,
-            ):
-                # Patch create_learning_event 走 fallback 以保证 archive 完整路径
-                fake_cle = MagicMock()
-                fake_cle.ainvoke = AsyncMock(
-                    return_value={"ok": True, "event_id": "ev-fb"}
-                )
-                with patch.object(agent_tools, "create_learning_event", fake_cle):
-                    out = await archive_three_way(
-                        video_id="BV1",
-                        title="t",
-                        up_name="up",
-                        markdown="# body",
-                        scheduled_at="2026-01-01T00:00:00",
-                        topic="fallback topic",
+            # Skip Apple Reminders in archive_three_way (避免污染真实【学习】列表)
+            with patch("sys.platform", "linux"):
+                with patch(
+                    "aipulse.summarizers.agent.tools.get_settings",
+                    return_value=settings,
+                ):
+                    # Patch create_learning_event 走 fallback 以保证 archive 完整路径
+                    fake_cle = MagicMock()
+                    fake_cle.ainvoke = AsyncMock(
+                        return_value={"ok": True, "event_id": "ev-fb"}
                     )
+                    with patch.object(agent_tools, "create_learning_event", fake_cle):
+                        out = await archive_three_way(
+                            video_id="BV1",
+                            title="t",
+                            up_name="up",
+                            markdown="# body",
+                            scheduled_at="2026-01-01T00:00:00",
+                            topic="fallback topic",
+                        )
         finally:
             agent_tools.send_notification = original_sn
 
@@ -249,19 +251,21 @@ class TestArchiveThreeWay:
         original_sn = agent_tools.send_notification
         agent_tools.send_notification = type("NoCoroTool", (), {})()
         try:
-            with patch(
-                "aipulse.summarizers.agent.tools.get_settings",
-                return_value=settings,
-            ):
-                with patch.object(agent_tools, "create_learning_event", fake_cle):
-                    out = await archive_three_way(
-                        video_id="BV1",
-                        title="t",
-                        up_name="up",
-                        markdown="# body",
-                        scheduled_at="2026-01-01T00:00:00",
-                        topic="topic",
-                    )
+            # Skip Apple Reminders in archive_three_way (避免污染真实【学习】列表)
+            with patch("sys.platform", "linux"):
+                with patch(
+                    "aipulse.summarizers.agent.tools.get_settings",
+                    return_value=settings,
+                ):
+                    with patch.object(agent_tools, "create_learning_event", fake_cle):
+                        out = await archive_three_way(
+                            video_id="BV1",
+                            title="t",
+                            up_name="up",
+                            markdown="# body",
+                            scheduled_at="2026-01-01T00:00:00",
+                            topic="topic",
+                        )
         finally:
             agent_tools.send_notification = original_sn
 
@@ -289,19 +293,21 @@ class TestArchiveThreeWay:
         original_sn = agent_tools.send_notification
         agent_tools.send_notification = type("NoCoroTool", (), {})()
         try:
-            with patch(
-                "aipulse.summarizers.agent.tools.get_settings",
-                return_value=settings,
-            ):
-                with patch.object(agent_tools, "create_learning_event", fake_cle):
-                    out = await archive_three_way(
-                        video_id="BV1",
-                        title="t",
-                        up_name="up",
-                        markdown="# body",
-                        scheduled_at="2026-01-01T00:00:00",
-                        topic="topic",
-                    )
+            # Skip Apple Reminders in archive_three_way (避免污染真实【学习】列表)
+            with patch("sys.platform", "linux"):
+                with patch(
+                    "aipulse.summarizers.agent.tools.get_settings",
+                    return_value=settings,
+                ):
+                    with patch.object(agent_tools, "create_learning_event", fake_cle):
+                        out = await archive_three_way(
+                            video_id="BV1",
+                            title="t",
+                            up_name="up",
+                            markdown="# body",
+                            scheduled_at="2026-01-01T00:00:00",
+                            topic="topic",
+                        )
         finally:
             agent_tools.send_notification = original_sn
 
@@ -380,16 +386,18 @@ class TestArchiveThreeWay:
         original_sn = agent_tools.send_notification
         agent_tools.send_notification = type("NoCoroTool", (), {})()
         try:
-            with patch.object(agent_tools, "create_obsidian_note", fake_cnote):
-                with patch.object(agent_tools, "create_learning_event", fake_cle):
-                    out = await archive_three_way(
-                        video_id="BV1",
-                        title="t",
-                        up_name="up",
-                        markdown="# body",
-                        scheduled_at="2026-01-01T00:00:00",
-                        topic="topic",
-                    )
+            # Skip Apple Reminders in archive_three_way (避免污染真实【学习】列表)
+            with patch("sys.platform", "linux"):
+                with patch.object(agent_tools, "create_obsidian_note", fake_cnote):
+                    with patch.object(agent_tools, "create_learning_event", fake_cle):
+                        out = await archive_three_way(
+                            video_id="BV1",
+                            title="t",
+                            up_name="up",
+                            markdown="# body",
+                            scheduled_at="2026-01-01T00:00:00",
+                            topic="topic",
+                        )
         finally:
             agent_tools.send_notification = original_sn
 

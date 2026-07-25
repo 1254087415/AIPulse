@@ -63,11 +63,13 @@ async def test_create_reminder_short_title(monkeypatch) -> None:
             await create_reminder(title="t", due_date="2026-08-01T10:00:00")
         return
     # 在 darwin 上若 osascript 失败也不应默默成功 — 至少尝试一次
+    # 显式传 list_name="AIPulse测试" 避免污染用户真实的【学习】列表
     try:
         await create_reminder(
             title="AIPulse test",
             due_date="2026-08-01T10:00:00",
             notes="hi",
+            list_name="AIPulse测试",
         )
     except RuntimeError:
         # ok — sandboxed envs may not have Reminders access
