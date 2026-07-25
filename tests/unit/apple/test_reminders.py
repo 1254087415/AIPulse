@@ -8,9 +8,42 @@
 
 from __future__ import annotations
 
+import logging
+import platform
+import sys
+from collections.abc import AsyncGenerator
+
 import pytest
+import pytest_asyncio
 
 from aipulse.apple.reminders import _escape_for_applescript, _format_due_date, create_reminder
+
+logger = logging.getLogger(__name__)
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _cleanup_aipulse_test_reminders() -> AsyncGenerator[None, None]:
+    """Session teardown: remove the ``AIPulse测试`` Reminders list on macOS.
+
+    Best-effort — any exception is logged and swallowed so cleanup never
+    affects pytest exit codes or downstream sessions.
+    """
+    yield  # run all tests first ...
+    # ... then teardown only on darwin
+    if sys.platform != "darwin" or platform.system() != "Darwin":
+        return
+    try:
+        from scripts.clean_reminders import cleanup_reminders_test_data
+
+        outcome = await cleanup_reminders_test_data()
+        if outcome == "deleted":
+            logger.info("Removed AIPulse测试 Reminders list created by tests")
+        elif outcome == "not-found":
+            logger.debug("AIPulse测试 Reminders list was already absent")
+    except Exception as exc:  # noqa: BLE001 — cleanup must not fail the session
+        logger.warning(
+            "Failed to clean AIPulse测试 Reminders list (best-effort): %s", exc
+        )
 
 
 def test_format_due_date_with_t_separator() -> None:
