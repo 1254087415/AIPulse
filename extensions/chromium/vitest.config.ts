@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  defineEnv: {
-    VITEST: 'true',
+  define: {
+    __E2E__: 'false',
   },
   test: {
     globals: true,

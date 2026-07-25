@@ -221,8 +221,21 @@ const ALLOWED_FETCH_HOSTS = [
 // Per-tab throttle map: prevents concurrent DOUYIN_DEBUGGER_HOVER requests for the same tab.
 // Key is decimal tabId string; value is the in-flight dispatch promise.
 // Released via finally{} after each request resolves or rejects.
+//
+// MV3 service worker lifecycle: when the SW terminates and later restarts,
+// this module-level map is reset, which is correct — old promises are gone
+// anyway. The danger is the INVERSE: inFlight promise surviving the SW and
+// pointing at a tab Chrome has already auto-detached because the SW died
+// mid-call. The fleet uses `clearThrottleMap()` on onStartup/onInstalled to
+// make sure no ghost entries leak across SW restarts.
 // Exported for testing only — do not call outside tests.
 export const DEBUGGER_TAB_THROTTLE_MAP: Record<string, Promise<unknown>> = {};
+
+export function clearThrottleMap(): void {
+  for (const key of Object.keys(DEBUGGER_TAB_THROTTLE_MAP)) {
+    delete DEBUGGER_TAB_THROTTLE_MAP[key];
+  }
+}
 
 function isAllowedFetchHost(url: string): boolean {
   try {
@@ -441,6 +454,23 @@ export function handleMessage(
               if (n === null) throw new Error('invalid target');
               return chrome.debugger.detach({ tabId: n });
             },
+            // Detect whether the target tab is already being debugged by us OR
+            // another extension. We only check foreign debuggers — our own
+            // thumbnail history doesn't matter because throttle-key already
+            // gates same-tab concurrency.
+            isTabBeingDebugged: async (target: { tabId: string }) => {
+              const n = parseDebuggerTabId(Number(target.tabId));
+              if (n === null) throw new Error('invalid target');
+              const targets = await chrome.debugger.getTargets();
+              return targets.some(
+                (t) =>
+                  t.tabId === n &&
+                  t.attached &&
+                  // Ignore our own extension's debugger, if any — we only care
+                  // about foreign debugger sessions (React/Vue/Redux DevTools, etc).
+                  (!t.extensionId || t.extensionId !== chrome.runtime.id)
+              );
+            },
           };
 
           const result = await dispatchTrustedHover(
@@ -563,7 +593,17 @@ function handleTabUpdated(tabId: number, changeInfo: chrome.tabs.TabChangeInfo):
 
 if (typeof chrome !== 'undefined') {
   chrome.runtime.onMessage.addListener(handleMessage);
-  chrome.runtime.onInstalled.addListener(setupContextMenus);
+  chrome.runtime.onInstalled.addListener(() => {
+    setupContextMenus();
+    // Fresh install: drop any throttle-map state left over from a previous
+    // instance (the map is module-level but the SW process restarts cleanly,
+    // so this is defensive belt-and-braces).
+    clearThrottleMap();
+  });
+  chrome.runtime.onStartup?.addListener(() => {
+    // Browser startup: module reload — clear stale throttle entries.
+    clearThrottleMap();
+  });
   chrome.contextMenus.onClicked.addListener((info) => {
     void handleContextMenuClick(info);
   });

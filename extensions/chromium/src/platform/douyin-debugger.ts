@@ -36,6 +36,15 @@ export interface DebuggerApi {
     params?: Record<string, unknown>
   ): Promise<unknown>;
   detach(target: DebuggerTarget): Promise<void>;
+  /**
+   * Returns true if the target tab is already being debugged by some
+   * other debugger (React DevTools, Vue DevTools, etc). When true we
+   * MUST NOT call attach — Chrome returns a confusingly worded error
+   * that varies across versions and could otherwise trigger our retry loop.
+   *
+   * Implementations should mirror `chrome.debugger.getTargets()`.
+   */
+  isTabBeingDebugged(target: DebuggerTarget): Promise<boolean>;
 }
 
 export interface DebuggerTarget {
@@ -168,6 +177,23 @@ export async function dispatchTrustedHover(
   }
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // ---- Pre-attach: detect another debugger already attached ----------------
+    // chrome.debugger.attach returns error messages that vary across Chrome
+    // versions and other extensions (React DevTools, Vue DevTools) — string
+    // matching is fragile. Querying getTargets() first lets us know up-front
+    // and avoid a noisy retry loop when the conflict is structural.
+    try {
+      if (await api.isTabBeingDebugged(target)) {
+        // Another debugger is on this tab. We MUST NOT attach; doing so would
+        // surface Chrome's banner and disturb the user's existing debugging
+        // session. Fall back to the safe long-link path.
+        return { captured: false, fallback: true };
+      }
+    } catch {
+      // getTargets() failure: proceed with attach attempt; the attach path's
+      // own error handling will deal with the conflict if it exists.
+    }
+
     // ---- Attach -------------------------------------------------------------
     try {
       await api.attach(target, '1.3');
@@ -252,6 +278,12 @@ export async function dispatchTrustedHover(
       detachError = null;
     } catch (e) {
       detachError = e;
+      // Surface for diagnostics. We do not propagate this because the user's
+      // hover/capture path may have succeeded — failing the whole promise
+      // would discard a valid short link.
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('AIPulse: debugger detach failed', e);
+      }
     }
 
     // ---- Evaluate result ----------------------------------------------------

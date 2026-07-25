@@ -18,15 +18,48 @@ import { cleanTrackingParams, dedupeLinks } from './utils';
 // - Synchronous throw when extension context is invalidated
 // - chrome.runtime.lastError in callback
 // - Never forms an unhandled rejection
+// - Narrows the response into a strict shape; unknown fields are discarded
+//   so we never trust unverified shape from background.
 // ---------------------------------------------------------------------------
-function safeSendMessage(message: unknown): Promise<{ ok?: boolean; captured?: boolean; fallback?: boolean; error?: string } | undefined> {
+interface DebuggerHoverResponse {
+  ok: boolean;
+  captured: boolean;
+  fallback: boolean;
+}
+
+interface SendMessageEnvelope {
+  ok?: boolean;
+  captured?: boolean;
+  fallback?: boolean;
+  shareUrl?: string;
+  links?: unknown[];
+  error?: string;
+  [key: string]: unknown;
+}
+
+function isDebuggerHoverResponse(value: unknown): value is DebuggerHoverResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.ok === 'boolean' &&
+    typeof v.captured === 'boolean' &&
+    typeof v.fallback === 'boolean'
+  );
+}
+
+function safeSendMessage(message: unknown): Promise<SendMessageEnvelope | undefined> {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage(message, (response) => {
         // Suppress lastError — it indicates the extension context was
         // invalidated, which is expected during navigation/restart.
         void chrome.runtime.lastError;
-        resolve(response as { ok?: boolean; captured?: boolean; fallback?: boolean; error?: string } | undefined);
+        // Chrome types the response as `any`; narrow conservatively.
+        if (response === null || typeof response !== 'object') {
+          resolve(undefined);
+          return;
+        }
+        resolve(response as SendMessageEnvelope);
       });
     } catch {
       // Synchronous throw: extension context invalidated.
@@ -150,7 +183,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               point,
             });
 
-            if (debuggerResponse?.ok && !debuggerResponse?.fallback) {
+            // Schema-validate the response before trusting it. A malformed or
+            // attacker-controlled response cannot coerce us into skipping the
+            // fallback path. The cast is gated behind isDebuggerHoverResponse.
+            if (
+              debuggerResponse &&
+              isDebuggerHoverResponse(debuggerResponse) &&
+              debuggerResponse.ok &&
+              !debuggerResponse.fallback
+            ) {
               // Step 4a: Debugger succeeded — wait up to 5000 ms for the main-world
               // interceptor to populate capturedShareUrls.
               const captured = await waitForCapturedShareUrl(videoId, 5000);

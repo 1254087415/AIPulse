@@ -1091,3 +1091,97 @@ describe('DOUYIN_DEBUGGER_HOVER message handler', () => {
  *  - calls detach({tabId:123})
  *  - returns fallback:true when chrome.debugger.attach rejects with a conflict error
  */
+
+// ---------------------------------------------------------------------------
+// Security audit coverage: clearThrottleMap and stale SW state
+// ---------------------------------------------------------------------------
+
+describe('throttle map lifecycle', () => {
+  let mockChrome: MockChrome;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubGlobal('fetch', vi.fn());
+    const sessionStore: Record<string, unknown> = {};
+    mockChrome = {
+      runtime: {
+        onMessage: createMockEvent(),
+        onInstalled: createMockEvent(),
+        connectNative: vi.fn((name: string) => {
+          void name;
+          return createMockPort();
+        }),
+      },
+      storage: {
+        local: {
+          get: vi.fn((keys: string, callback: (result: Record<string, unknown>) => void) => {
+            callback({ [keys]: sessionStore[keys] });
+          }),
+          set: vi.fn((items: Record<string, unknown>, callback?: () => void) => {
+            Object.assign(sessionStore, items);
+            if (callback) callback();
+          }),
+        },
+      },
+      contextMenus: {
+        create: vi.fn(),
+        removeAll: vi.fn((callback?: () => void) => callback && callback()),
+        onClicked: createMockEvent(),
+      },
+      tabs: {
+        onRemoved: createMockEvent(),
+        onUpdated: createMockEvent(),
+      },
+      notifications: {
+        create: vi.fn(async () => 'notification-id'),
+      },
+      debugger: {
+        attach: vi.fn(async () => undefined),
+        detach: vi.fn(async () => undefined),
+        sendCommand: vi.fn(async () => undefined),
+        onEvent: createMockEvent(),
+      },
+    };
+    vi.stubGlobal('chrome', mockChrome as unknown as typeof chrome);
+  });
+
+  it('clearThrottleMap() drops all in-flight entries', async () => {
+    const mod = await import('../../src/background');
+    const map = mod.DEBUGGER_TAB_THROTTLE_MAP;
+    map['123'] = Promise.resolve('stale-123');
+    map['456'] = Promise.resolve('stale-456');
+    expect(Object.keys(map)).toHaveLength(2);
+
+    mod.clearThrottleMap();
+
+    expect(Object.keys(map)).toHaveLength(0);
+  });
+
+  it('chrome.runtime.onInstalled listener clears the throttle map', async () => {
+    const mod = await import('../../src/background');
+    const map = mod.DEBUGGER_TAB_THROTTLE_MAP;
+    map['99'] = Promise.resolve('leftover');
+
+    const installedListeners = mockChrome.runtime.onInstalled.listeners;
+    expect(installedListeners.length).toBeGreaterThan(0);
+    installedListeners[0]();
+
+    expect(Object.keys(map)).toHaveLength(0);
+  });
+
+  it('chrome.runtime.onStartup listener is registered when chrome provides it', async () => {
+    const startupMock = createMockEvent();
+    (mockChrome.runtime as Record<string, unknown>).onStartup = startupMock;
+
+    await import('../../src/background');
+
+    expect(startupMock.addListener).toHaveBeenCalled();
+  });
+
+  it('survives a missing chrome.runtime.onStartup (optional chain)', async () => {
+    // onStartup intentionally absent.
+    delete (mockChrome.runtime as Record<string, unknown>).onStartup;
+
+    await expect(import('../../src/background')).resolves.toBeDefined();
+  });
+});
