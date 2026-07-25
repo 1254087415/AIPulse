@@ -4,10 +4,12 @@ import PulseLine from './components/PulseLine.vue'
 
 const links = [
   { to: '/dashboard', label: 'AI 热点' },
+  { to: '/followed-up', label: '关注列表' },
   { to: '/keywords', label: '关键词' },
   { to: '/sources', label: '来源' },
   { to: '/jobs', label: '定时任务' },
   { to: '/digests', label: '摘要' },
+  { to: '/settings', label: '设置' },
 ]
 </script>
 

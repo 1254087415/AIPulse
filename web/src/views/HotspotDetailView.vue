@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useMutation } from '@tanstack/vue-query'
 import { fetchHotspot, fetchRelatedHotspots, archiveHotspot } from '../api/hotspots'
+import { enqueueSummary, subscribeSummaryEvents } from '../api/summary'
+import type { SummaryEventHandle } from '../api/summary'
+import type { SummaryEvent } from '../types'
 import HotspotList from '../components/hotspot/HotspotList.vue'
 import { formatDateTime } from '../lib/format'
 import { isSafeUrl } from '../lib/url'
@@ -27,6 +30,83 @@ const archive = useMutation({
 })
 
 const safeUrl = computed(() => (hotspot.value?.data.url && isSafeUrl(hotspot.value.data.url) ? hotspot.value.data.url : null))
+
+const BV_REGEX = /BV1[A-Za-z0-9]{9}/i
+const videoId = computed(() => {
+  const url = hotspot.value?.data.url ?? ''
+  const match = url.match(BV_REGEX)
+  return match ? match[0] : null
+})
+const canSummarize = computed(() => !!videoId.value)
+
+const summaryMessage = ref<string | null>(null)
+const summaryPhase = ref<'idle' | 'queued' | 'running' | 'completed' | 'failed'>('idle')
+const summaryError = ref<string | null>(null)
+let eventHandle: SummaryEventHandle | null = null
+
+function resetSummaryUi() {
+  summaryMessage.value = null
+  summaryPhase.value = 'idle'
+  summaryError.value = null
+}
+
+function teardownEvents() {
+  if (eventHandle) {
+    eventHandle.close()
+    eventHandle = null
+  }
+}
+
+onUnmounted(() => {
+  teardownEvents()
+})
+
+function handleSummaryEvent(event: SummaryEvent) {
+  if (event.type === 'started' || event.type === 'heartbeat') {
+    summaryPhase.value = 'running'
+    summaryMessage.value = event.type === 'started' ? '已入队，正在处理…' : summaryMessage.value ?? '处理中…'
+  } else if (event.type === 'completed') {
+    summaryPhase.value = 'completed'
+    summaryMessage.value = '总结完成，可到 Obsidian 查看'
+    teardownEvents()
+  } else if (event.type === 'partial') {
+    summaryPhase.value = 'completed'
+    summaryMessage.value = '已生成部分总结'
+    teardownEvents()
+  } else if (event.type === 'failed') {
+    summaryPhase.value = 'failed'
+    summaryError.value = String(event.error ?? '总结失败')
+    teardownEvents()
+  } else if (event.type === 'timeout') {
+    summaryPhase.value = 'failed'
+    summaryError.value = '总结超时，请稍后再试'
+    teardownEvents()
+  } else if (event.type === 'closing') {
+    teardownEvents()
+  } else if (event.type === 'error') {
+    summaryPhase.value = 'failed'
+    summaryError.value = String(event.error ?? '总结连接错误')
+  }
+}
+
+async function startSummary() {
+  if (!videoId.value) return
+  resetSummaryUi()
+  summaryPhase.value = 'queued'
+  summaryMessage.value = '正在入队…'
+  try {
+    const result = await enqueueSummary(videoId.value)
+    eventHandle = subscribeSummaryEvents(result.job_id, {
+      onEvent: handleSummaryEvent,
+      onError: () => {
+        summaryError.value = '总结事件流连接中断'
+      },
+    })
+  } catch (err) {
+    summaryPhase.value = 'failed'
+    summaryError.value = err instanceof Error ? err.message : '总结入队失败'
+  }
+}
 </script>
 
 <template>
@@ -88,11 +168,38 @@ const safeUrl = computed(() => (hotspot.value?.data.url && isSafeUrl(hotspot.val
         >
           {{ archive.isPending.value ? '归档中…' : '归档到 Obsidian' }}
         </button>
+        <button
+          v-if="canSummarize"
+          type="button"
+          class="btn primary"
+          :disabled="summaryPhase === 'queued' || summaryPhase === 'running'"
+          @click="startSummary"
+        >
+          {{
+            summaryPhase === 'queued'
+              ? '入队中…'
+              : summaryPhase === 'running'
+                ? '总结中…'
+                : '📝 总结'
+          }}
+        </button>
         <span v-if="archive.isSuccess.value" class="archive-hint" role="status" aria-live="polite">已归档</span>
+        <span
+          v-if="summaryMessage && summaryPhase !== 'idle' && summaryPhase !== 'failed'"
+          class="archive-hint"
+          role="status"
+          aria-live="polite"
+        >
+          {{ summaryMessage }}
+        </span>
       </div>
 
       <div v-if="archive.error.value" class="state state-error" role="alert" aria-live="polite">
         归档失败：{{ archive.error.value?.message }}
+      </div>
+
+      <div v-if="summaryError" class="state state-error" role="alert" aria-live="polite">
+        总结失败：{{ summaryError }}
       </div>
 
       <section v-if="related && related.data.length > 0" class="related">
@@ -213,6 +320,12 @@ const safeUrl = computed(() => (hotspot.value?.data.url && isSafeUrl(hotspot.val
 .archive-hint {
   font-size: 13px;
   color: var(--signal);
+}
+
+.btn.primary {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: #fff;
 }
 
 .related h2 {
