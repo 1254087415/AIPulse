@@ -167,7 +167,14 @@ class TestRunPipelineContract:
             }
         )
 
-        with patch("aipulse.summarizers.agent.runner.get_agent_executor", return_value=fake_executor):
+        # `run_summary_pipeline` calls `build_agent_executor()` (the factory),
+        # not `get_agent_executor()` (the lazy singleton accessor). Patch the
+        # path the production code actually reads to keep this test
+        # deterministic across refactors that swap one accessor for the other.
+        with patch(
+            "aipulse.summarizers.agent.runner.build_agent_executor",
+            return_value=fake_executor,
+        ):
             result = await run_summary_pipeline(
                 video_id="BV1",
                 title="t",

@@ -33,6 +33,14 @@ os.environ.setdefault("AUTO_CREATE_TABLES", "true")
 os.environ["LLM_BASE_URL"] = "https://api.kimi.com/coding/v1"
 os.environ["LLM_MODEL"] = "kimi-for-coding"
 os.environ.pop("LLM_API_KEY", None)
+# Provide placeholder secrets so build_agent_executor() can construct the
+# ChatOpenAI client without the underlying OpenAI SDK complaining about a
+# missing api_key (it falls back to OPENAI_API_KEY env var, raising OpenAIError
+# if neither is set). Placeholders are ignored by tests via test isolation
+# fixtures; production code paths run only when the real key has been provided
+# through PATCH /api/settings.
+os.environ.setdefault("KIMI_API_KEY", "sk-test-placeholder-kimi")
+os.environ.setdefault("OPENAI_API_KEY", "sk-test-placeholder-openai")
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

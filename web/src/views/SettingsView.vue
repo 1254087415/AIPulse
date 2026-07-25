@@ -68,6 +68,22 @@ function wechatFields(s: SettingsResponse): SettingsField[] {
     { key: 'wechat_openid', label: 'OpenID', value: s.wechat.wechat_openid ?? '' },
     { key: 'wechat_to_user', label: 'To User', value: s.wechat.wechat_to_user ?? '' },
     { key: 'wechat_account_id', label: 'Account ID', value: s.wechat.wechat_account_id ?? '' },
+    {
+      key: 'wechat_bot_token',
+      label: '机器人 Token (企业微信)',
+      masked: true,
+      // 不强制 value: 后端 settings_map 已包含此字段，缺省空串代表未设置
+    },
+    {
+      key: 'wechat_context_token_file',
+      label: '上下文 Token 文件路径',
+      value: s.wechat.wechat_context_token_file ?? '',
+    },
+    {
+      key: 'wechat_send_script',
+      label: '发送脚本路径',
+      value: s.wechat.wechat_send_script ?? '',
+    },
   ]
 }
 
