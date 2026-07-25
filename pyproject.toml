@@ -56,7 +56,7 @@ dev = [
 ]
 
 [project.scripts]
-aipulse-sidecar = "aipulse.desktop.sidecar:main"
+aipulse-sidecar = "aipulse.desktop.sidecar:cli"
 
 [build-system]
 requires = ["hatchling"]
