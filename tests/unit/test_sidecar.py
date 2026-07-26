@@ -75,8 +75,17 @@ async def test_retry_task_resets_status(sidecar: Sidecar) -> None:
 
 
 @pytest.mark.unit
-async def test_get_settings_masks_secrets(sidecar: Sidecar) -> None:
-    result = await sidecar.handle_request(JsonRpcRequest(method="get_settings", params={}))
+async def test_get_settings_masks_secrets(tmp_path: Path) -> None:
+    # 不依赖 sidecar fixture — 强制构造不走 .env 的 settings
+    reset_settings()
+    settings = AppSettings(  # type: ignore[call-arg]
+        _env_file=None,
+        data_dir=tmp_path / "data",
+        download_dir=tmp_path / "data" / "downloads",
+        database_url=f"sqlite+aiosqlite:///{tmp_path}/aipulse.db",
+    )
+    sc = Sidecar(settings=settings)
+    result = await sc.handle_request(JsonRpcRequest(method="get_settings", params={}))
     assert result.error is None
     assert result.result["llm_base_url"] == "https://api.kimi.com/coding/v1"
     assert result.result["llm_model"] == "kimi-for-coding"

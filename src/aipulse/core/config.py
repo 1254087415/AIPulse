@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 _SECRET_KEYS = {
     "llm_api_key",
+    "kimi_api_key",
     "feishu_secret",
     "wechat_appsecret",
     "wechat_bot_token",
@@ -39,6 +40,16 @@ class AppSettings(BaseSettings):
     llm_api_key: SecretStr = Field(default=SecretStr(""))
     llm_base_url: str = "https://api.kimi.com/coding/v1"
     llm_model: str = "kimi-for-coding"
+
+    # v0.3 — Kimi specific (independent config; used by follow + learning phase)
+    # NOTE: kimi_* defaults are aligned with the Kimi coding endpoint per
+    # v0.3 spec §5.3 (kimi-for-coding + api.kimi.com/coding/v1). If the user
+    # later decides to keep llm_* as the canonical Kimi path instead, this
+    # block can be reverted.
+    kimi_api_key: SecretStr = Field(default=SecretStr(""))
+    kimi_base_url: str = "https://api.kimi.com/coding/v1"
+    kimi_model: str = "kimi-for-coding"
+    learning_notification_enabled: bool = True
 
     # Whisper
     whisper_model: str = "small"
@@ -136,6 +147,9 @@ class AppSettings(BaseSettings):
             "llm_provider",
             "llm_base_url",
             "llm_model",
+            "kimi_base_url",
+            "kimi_model",
+            "learning_notification_enabled",
             "whisper_model",
             "obsidian_vault_path",
             "obsidian_archive_folder",

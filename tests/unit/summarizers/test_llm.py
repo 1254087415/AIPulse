@@ -69,8 +69,10 @@ def test_adapter_creates_real_client_from_settings(settings: AppSettings) -> Non
 
 @pytest.mark.unit
 def test_adapter_creates_real_client_with_default_key() -> None:
+    # 构造一个不走 .env 的 settings：强制空 key，base_url 不传（走 defaults）
+    settings = AppSettings(_env_file=None, llm_api_key=SecretStr(""), kimi_api_key=SecretStr(""))  # type: ignore[call-arg]
     with patch("aipulse.summarizers.llm.AsyncOpenAI") as mock_client_cls:
-        adapter = OpenAICompatibleAdapter()
+        adapter = OpenAICompatibleAdapter(settings)
         assert adapter.base_url == DEFAULT_BASE_URL
         assert adapter.model == DEFAULT_MODEL
         mock_client_cls.assert_called_once_with(

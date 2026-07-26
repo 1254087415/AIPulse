@@ -2,6 +2,7 @@ import { submitViaHttp } from './http';
 import { submitViaNativeMessaging } from './native';
 import type { FoundLink, SubmitMode, SubmitPayload, SubmitResult } from './types';
 import { cleanTrackingParams, dedupeLinks } from './utils';
+import { dispatchTrustedHover } from './platform/douyin-debugger';
 
 const ALLOWED_MODES: SubmitMode[] = ['archive', 'knowledge_check'];
 // Flat array of the most recently reporting tab. Kept for backward compatibility:
@@ -11,7 +12,7 @@ const FOUND_LINKS_KEY = 'foundLinks';
 const FOUND_LINKS_BY_TAB_KEY = 'foundLinksByTab';
 
 interface BackgroundMessage {
-  type: 'FOUND_LINKS' | 'SUBMIT_URL' | 'GET_FOUND_LINKS' | 'FETCH_JSON';
+  type: 'FOUND_LINKS' | 'SUBMIT_URL' | 'GET_FOUND_LINKS' | 'FETCH_JSON' | 'DOUYIN_DEBUGGER_HOVER';
   links?: FoundLink[];
   tabId?: unknown;
   url?: unknown;
@@ -20,6 +21,7 @@ interface BackgroundMessage {
   tags?: unknown;
   subtitle_text?: unknown;
   subtitle_language?: unknown;
+  point?: unknown;
 }
 
 function isValidSubtitleText(value: unknown): value is string {
@@ -51,6 +53,20 @@ function isValidUrl(value: unknown): value is string {
 
 function isValidMode(value: unknown): value is SubmitMode {
   return typeof value === 'string' && (ALLOWED_MODES as string[]).includes(value);
+}
+
+/**
+ * Parses and validates a tabId value as a strict decimal positive integer.
+ * Returns the valid tabId as a number, or null if the value is not a
+ * decimal positive integer (rejects hex, octal, negative, zero, NaN, floats).
+ *
+ * This is used by the debuggerApi adapter to validate target.tabId before
+ * calling chrome.debugger.* APIs.
+ */
+function parseDebuggerTabId(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
+  if (value <= 0) return null;
+  return value;
 }
 
 function errorMessage(err: unknown): string {
@@ -202,6 +218,25 @@ const ALLOWED_FETCH_HOSTS = [
   'localhost',
 ];
 
+// Per-tab throttle map: prevents concurrent DOUYIN_DEBUGGER_HOVER requests for the same tab.
+// Key is decimal tabId string; value is the in-flight dispatch promise.
+// Released via finally{} after each request resolves or rejects.
+//
+// MV3 service worker lifecycle: when the SW terminates and later restarts,
+// this module-level map is reset, which is correct — old promises are gone
+// anyway. The danger is the INVERSE: inFlight promise surviving the SW and
+// pointing at a tab Chrome has already auto-detached because the SW died
+// mid-call. The fleet uses `clearThrottleMap()` on onStartup/onInstalled to
+// make sure no ghost entries leak across SW restarts.
+// Exported for testing only — do not call outside tests.
+export const DEBUGGER_TAB_THROTTLE_MAP: Record<string, Promise<unknown>> = {};
+
+export function clearThrottleMap(): void {
+  for (const key of Object.keys(DEBUGGER_TAB_THROTTLE_MAP)) {
+    delete DEBUGGER_TAB_THROTTLE_MAP[key];
+  }
+}
+
 function isAllowedFetchHost(url: string): boolean {
   try {
     const host = new URL(url).hostname;
@@ -331,6 +366,142 @@ export function handleMessage(
     return true;
   }
 
+  // ---- DOUYIN_DEBUGGER_HOVER -------------------------------------------------
+  if (message.type === 'DOUYIN_DEBUGGER_HOVER') {
+    // Validate sender.tab
+    if (!sender.tab || typeof sender.tab.id !== 'number') {
+      sendResponse({ ok: false, fallback: false, error: 'invalid sender' });
+      return false;
+    }
+
+    // Always use sender.tab.id as the debugger target.
+    // Content scripts cannot reliably know their own tabId, so we ignore
+    // any message.tabId field entirely (malicious or otherwise).
+    const targetTabId = sender.tab.id;
+
+    // Validate sender.tab.url is https://www.douyin.com
+    const tabUrl = sender.tab.url;
+    if (typeof tabUrl !== 'string') {
+      sendResponse({ ok: false, fallback: false, error: 'invalid url' });
+      return false;
+    }
+    let urlHostname: string;
+    try {
+      urlHostname = new URL(tabUrl).hostname;
+    } catch {
+      sendResponse({ ok: false, fallback: false, error: 'invalid url' });
+      return false;
+    }
+    if (urlHostname !== 'www.douyin.com') {
+      sendResponse({ ok: false, fallback: false, error: 'invalid url' });
+      return false;
+    }
+    try {
+      const protocol = new URL(tabUrl).protocol;
+      if (protocol !== 'https:') {
+        sendResponse({ ok: false, fallback: false, error: 'invalid url' });
+        return false;
+      }
+    } catch {
+      sendResponse({ ok: false, fallback: false, error: 'invalid url' });
+      return false;
+    }
+
+    // Validate point
+    const point = message.point as { x?: unknown; y?: unknown } | undefined;
+    if (
+      !point ||
+      typeof point.x !== 'number' || !Number.isFinite(point.x) || point.x < 0 ||
+      typeof point.y !== 'number' || !Number.isFinite(point.y) || point.y < 0
+    ) {
+      sendResponse({ ok: false, fallback: false, error: 'invalid point' });
+      return false;
+    }
+
+    // Per-tab throttle: reject concurrent requests for the same tab.
+    const throttleKey = String(targetTabId);
+    if (DEBUGGER_TAB_THROTTLE_MAP[throttleKey] !== undefined) {
+      sendResponse({ ok: false, fallback: true, error: 'debugger busy' });
+      return false;
+    }
+
+    // All validations passed - call dispatchTrustedHover
+    void (async () => {
+      // Register in-flight promise for per-tab throttle (released in finally)
+      const inFlight = (async () => {
+        try {
+          // Adapter: douyin-debugger expects DebuggerTarget.tabId as string,
+          // but chrome.debugger uses Debuggee.tabId as number.
+          // Validate tabId as strict decimal positive integer before calling
+          // chrome.debugger.* to prevent passing invalid values.
+          const validatedTabId = parseDebuggerTabId(targetTabId);
+          if (validatedTabId === null) {
+            throw new Error('invalid target');
+          }
+          const debuggerApi = {
+            attach: (target: { tabId: string }, version: string) => {
+              const n = parseDebuggerTabId(Number(target.tabId));
+              if (n === null) throw new Error('invalid target');
+              return chrome.debugger.attach({ tabId: n }, version);
+            },
+            sendCommand: (target: { tabId: string }, method: string, params?: Record<string, unknown>) => {
+              const n = parseDebuggerTabId(Number(target.tabId));
+              if (n === null) throw new Error('invalid target');
+              return chrome.debugger.sendCommand({ tabId: n }, method, params);
+            },
+            detach: (target: { tabId: string }) => {
+              const n = parseDebuggerTabId(Number(target.tabId));
+              if (n === null) throw new Error('invalid target');
+              return chrome.debugger.detach({ tabId: n });
+            },
+            // Detect whether the target tab is already being debugged by us OR
+            // another extension. We only check foreign debuggers — our own
+            // thumbnail history doesn't matter because throttle-key already
+            // gates same-tab concurrency.
+            isTabBeingDebugged: async (target: { tabId: string }) => {
+              const n = parseDebuggerTabId(Number(target.tabId));
+              if (n === null) throw new Error('invalid target');
+              const targets = await chrome.debugger.getTargets();
+              return targets.some(
+                (t) =>
+                  t.tabId === n &&
+                  t.attached &&
+                  // Ignore our own extension's debugger, if any — we only care
+                  // about foreign debugger sessions (React/Vue/Redux DevTools, etc).
+                  (!t.extensionId || t.extensionId !== chrome.runtime.id)
+              );
+            },
+          };
+
+          const result = await dispatchTrustedHover(
+            String(targetTabId),
+            { x: point.x as number, y: point.y as number },
+            {
+              api: debuggerApi,
+              captureAttempt: async () => ({ captured: true }),
+              wait: async (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+              timeoutMs: 5000,
+              maxAttempts: 3,
+              retryDelaysMs: [1000, 2000],
+            }
+          );
+          return { ok: true, captured: result.captured, fallback: result.fallback };
+        } catch {
+          return { ok: false, fallback: false, error: 'debugger error' };
+        }
+      })();
+
+      DEBUGGER_TAB_THROTTLE_MAP[throttleKey] = inFlight;
+      try {
+        const response = await inFlight;
+        sendResponse(response);
+      } finally {
+        delete DEBUGGER_TAB_THROTTLE_MAP[throttleKey];
+      }
+    })();
+    return true;
+  }
+
   sendResponse({ ok: false, error: 'invalid message' });
   return false;
 }
@@ -422,7 +593,17 @@ function handleTabUpdated(tabId: number, changeInfo: chrome.tabs.TabChangeInfo):
 
 if (typeof chrome !== 'undefined') {
   chrome.runtime.onMessage.addListener(handleMessage);
-  chrome.runtime.onInstalled.addListener(setupContextMenus);
+  chrome.runtime.onInstalled.addListener(() => {
+    setupContextMenus();
+    // Fresh install: drop any throttle-map state left over from a previous
+    // instance (the map is module-level but the SW process restarts cleanly,
+    // so this is defensive belt-and-braces).
+    clearThrottleMap();
+  });
+  chrome.runtime.onStartup?.addListener(() => {
+    // Browser startup: module reload — clear stale throttle entries.
+    clearThrottleMap();
+  });
   chrome.contextMenus.onClicked.addListener((info) => {
     void handleContextMenuClick(info);
   });

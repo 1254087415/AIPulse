@@ -17,6 +17,7 @@ eggs/
 lib/
 !web/src/lib/
 !web/src/lib/format.ts
+!frontend/src/lib/
 lib64/
 parts/
 sdist/
@@ -48,6 +49,10 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+
+# pnpm artifacts (project uses npm — pnpm files only appear from accidental runs)
+frontend/pnpm-lock.yaml
+frontend/pnpm-workspace.yaml
 .pytest_cache/
 cover/
 
@@ -196,9 +201,13 @@ src-tauri/resources/
 .agents/
 skills-lock.json
 
+# OpenAI Codex CLI local config (agents + MCP servers)
+.codex/
+
 # Playwright MCP / agent tool artifacts
 .playwright-mcp/
 .agnes/
+.codex/
 
 # Vite / Vitest caches
 .vite/

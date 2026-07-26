@@ -89,6 +89,14 @@ body {
   cursor: not-allowed;
 }
 
+.icon-btn:focus-visible,
+.mode-selector button:focus-visible,
+.actions button:focus-visible,
+.submit-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .status {
   margin: 0;
   font-size: 12px;
@@ -152,6 +160,11 @@ body {
 .field input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .field input:disabled {
@@ -256,6 +269,11 @@ body {
   border-color: var(--accent);
 }
 
+.field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .field select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -294,4 +312,72 @@ body {
 .submit-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.debugger-card {
+  background: var(--card-bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.debugger-card h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.debugger-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.debugger-card .debugger-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.debugger-card button {
+  flex: 1;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.debugger-card .debugger-confirm {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+
+.debugger-card .debugger-confirm:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.debugger-card .debugger-decline {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.debugger-card .debugger-decline:hover:not(:disabled) {
+  background: #f2f2f3;
+}
+
+.debugger-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.debugger-card button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }

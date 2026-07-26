@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { extractBilibiliLinks } from '../../src/platform/bilibili';
 import { setSubtitleRetryDelayMs } from '../../src/platform/bilibili-subtitles';
 import { extractDouyinLinks } from '../../src/platform/douyin';
-import { clearCapturedShareUrls, setCapturedShareUrl } from '../../src/platform/douyin-share';
+import { clearCapturedShareUrls, setCapturedShareUrl, requestShareUrlCapture } from '../../src/platform/douyin-share';
 import { extractXiaohongshuLinks } from '../../src/platform/xiaohongshu';
 import { extractWechatLinks } from '../../src/platform/wechat';
 
@@ -649,5 +649,24 @@ describe('extractWechatLinks', () => {
     const doc = makeDoc('<html></html>');
     expect(extractWechatLinks(doc, 'https://mp.weixin.qq.com/s/')).toHaveLength(0);
     expect(extractWechatLinks(doc, 'https://mp.weixin.qq.com/s/abc!')).toHaveLength(0);
+  });
+});
+
+describe('requestShareUrlCapture', () => {
+  beforeEach(() => {
+    clearCapturedShareUrls();
+  });
+
+  it('returns cached share URL if already captured', async () => {
+    setCapturedShareUrl('1234567890', 'https://v.douyin.com/Cached/');
+    const doc = makeDoc('<html></html>');
+    const result = await requestShareUrlCapture(doc, '1234567890');
+    expect(result).toBe('https://v.douyin.com/Cached/');
+  });
+
+  it('returns undefined when no share button exists', async () => {
+    const doc = makeDoc('<html><body><p>No share button here</p></body></html>');
+    const result = await requestShareUrlCapture(doc, '9999999999');
+    expect(result).toBeUndefined();
   });
 });

@@ -1,0 +1,47 @@
+/**
+ * Sidebar design tokens (spec §6.8).
+ *
+ * Bound to `:root` so any descendant component can reference the same vars.
+ * `--signal-rgb` / `--ink-rgb` are expected to be defined by the global
+ * tokens.css (kept here as fallbacks so the file is portable in tests).
+ */
+:root {
+  --sidebar-width: 200px;
+  --sidebar-width-collapsed: 56px;
+
+  --sidebar-bg: var(--surface-elevated, #ffffff);
+  --sidebar-main-bg: var(--surface-bg, #f7f7f5);
+
+  --sidebar-item-height: 36px;
+  --sidebar-item-gap: 4px;
+  --sidebar-item-padding-x: 16px;
+  --sidebar-item-padding-y: 8px;
+  --sidebar-item-radius: 6px;
+
+  --sidebar-active-bar-width: 3px;
+  --sidebar-active-bar-color: var(--accent-coral, #f97316);
+  --sidebar-active-text-color: var(--text-primary, #1a1a1a);
+  --sidebar-active-bg: color-mix(in srgb, var(--accent-coral, #f97316) 8%, transparent);
+
+  --sidebar-hover-bg: color-mix(in srgb, var(--text-primary, #1a1a1a) 4%, transparent);
+  --sidebar-transition: 150ms ease-out;
+
+  --sidebar-icon-size: 18px;
+  --sidebar-text-size: 14px;
+  --sidebar-text-weight: 400;
+
+  --sidebar-bottom-text-size: 11px;
+  --sidebar-bottom-text-color: var(--text-secondary, #6b6b6b);
+
+  --tab-padding-y: 16px;
+  --tab-underline-color: var(--accent-coral, #f97316);
+  --tab-active-text-color: var(--text-primary, #1a1a1a);
+  --tab-inactive-text-color: var(--text-secondary, #6b6b6b);
+
+  --state-healthy: #16a34a;
+  --state-warning: #d97706;
+  --state-error: var(--status-red, #ef4444);
+  --state-queued: #d97706;
+  --state-running: #2563eb;
+  --state-done: #16a34a;
+}

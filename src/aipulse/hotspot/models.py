@@ -9,6 +9,16 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from aipulse.store.models import Base
 
+# v0.3: explicit string length for nullable fields added in §3.4
+FOLLOWED_UP_ID_LENGTH = 32
+FOLLOWED_UP_COLLECTION_ID_LENGTH = 32
+LEARNING_EVENT_ID_LENGTH = 32
+CONTENT_ID_LENGTH = 64
+PLATFORM_USER_ID_LENGTH = 64
+OBSIDIAN_PATH_LENGTH = 512
+DECISION_STATUS_LENGTH = 16
+LEARNING_STATUS_LENGTH = 16
+
 URL_LENGTH = 768  # MySQL utf8mb4 index limit (768*4=3072 bytes)
 
 
@@ -54,6 +64,9 @@ class Hotspot(Base):
         """Apply Python-side defaults during construction."""
         kwargs.setdefault("heat_score", 0.0)
         kwargs.setdefault("importance", "medium")
+        kwargs.setdefault("decision_status", "pending")
+        kwargs.setdefault("is_backfill", False)
+        kwargs.setdefault("notified", False)
         kwargs.setdefault("status", "pending")
         kwargs.setdefault("fetched_at", now_utc())
         kwargs.setdefault("created_at", now_utc())
@@ -75,6 +88,40 @@ class Hotspot(Base):
     raw_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(default=now_utc, onupdate=now_utc)
+
+    # v0.3 §3.4 — followed-up / learning domain linkage
+    followed_up_id: Mapped[str | None] = mapped_column(
+        ForeignKey("followed_up.id"), nullable=True
+    )
+    followed_up_collection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("followed_up_collections.id"), nullable=True
+    )
+    content_id: Mapped[str | None] = mapped_column(String(CONTENT_ID_LENGTH), nullable=True)
+    platform_user_id: Mapped[str | None] = mapped_column(
+        String(PLATFORM_USER_ID_LENGTH), nullable=True
+    )
+    transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_points: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    is_tech_related: Mapped[bool | None] = mapped_column(nullable=True)
+    tech_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tech_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_status: Mapped[str] = mapped_column(
+        String(DECISION_STATUS_LENGTH), default="pending"
+    )
+    learning_status: Mapped[str | None] = mapped_column(
+        String(LEARNING_STATUS_LENGTH), nullable=True
+    )
+    is_backfill: Mapped[bool] = mapped_column(default=False)
+    obsidian_source_path: Mapped[str | None] = mapped_column(
+        String(OBSIDIAN_PATH_LENGTH), nullable=True
+    )
+    obsidian_summary_path: Mapped[str | None] = mapped_column(
+        String(OBSIDIAN_PATH_LENGTH), nullable=True
+    )
+    learning_event_id: Mapped[str | None] = mapped_column(
+        String(LEARNING_EVENT_ID_LENGTH), nullable=True
+    )
+    notified: Mapped[bool] = mapped_column(default=False)
 
 
 class Keyword(Base):

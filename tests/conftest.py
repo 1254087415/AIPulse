@@ -8,6 +8,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aipulse.core.config import get_settings
+from aipulse.models import (  # noqa: F401  registers new follow + learning tables
+    followed_up,
+    followed_up_collections,
+    learning_events,
+)
 from aipulse.server import app
 from aipulse.store.database import (
     configure_test_database,

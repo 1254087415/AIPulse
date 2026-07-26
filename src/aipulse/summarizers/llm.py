@@ -49,7 +49,7 @@ class OpenAICompatibleAdapter:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.3,
+                temperature=1.0,  # Kimi kimi-for-coding only supports 1.0
             )
         except RateLimitError as exc:
             logger.exception("LLM rate limit exceeded")

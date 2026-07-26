@@ -1,0 +1,11 @@
+/**
+ * Follow list panel styles are colocated inside FollowListPanel.vue as a
+ * scoped <style> block. This file exists so external tooling / docs can
+ * reference the panel as a styling unit; it just re-imports nothing.
+ */
+
+.follow-list-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
