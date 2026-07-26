@@ -15,8 +15,8 @@ def settings(tmp_path) -> AppSettings:
     return AppSettings(
         data_dir=tmp_path / "data",
         download_dir=tmp_path / "data" / "downloads",
-        KIMI_BASE_URL="https://api.example.com/v1",
-        KIMI_MODEL="test-model",
+        LLM_BASE_URL="https://api.example.com/v1",
+        LLM_MODEL="test-model",
     )
 
 
@@ -55,7 +55,7 @@ async def test_complete_uses_defaults_when_settings_empty(mock_client: AsyncOpen
 
 @pytest.mark.unit
 def test_adapter_creates_real_client_from_settings(settings: AppSettings) -> None:
-    settings.kimi_api_key = SecretStr("test-key")
+    settings.llm_api_key = SecretStr("test-key")
     with patch("aipulse.summarizers.llm.AsyncOpenAI") as mock_client_cls:
         adapter = OpenAICompatibleAdapter(settings)
         assert adapter.base_url == "https://api.example.com/v1"
@@ -70,13 +70,13 @@ def test_adapter_creates_real_client_from_settings(settings: AppSettings) -> Non
 @pytest.mark.unit
 def test_adapter_creates_real_client_with_default_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # 构造一个不走 .env 的 settings：强制空 key，base_url 不传（走 defaults）。
-    # conftest 在 os.environ 中放了 KIMI_API_KEY=sk-test-placeholder-kimi 以保证
+    # conftest 在 os.environ 中放了 LLM_API_KEY=sk-test-placeholder-llm 以保证
     # build_agent_executor 不会因为缺少 OPENAI_API_KEY 崩溃；本测试要验证的是
-    # _env_file=None + 显式空 kimi_api_key 的组合行为，所以必须把环境变量也
+    # _env_file=None + 显式空 llm_api_key 的组合行为，所以必须把环境变量也
     # 屏蔽掉。
-    monkeypatch.delenv("KIMI_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
-    settings = AppSettings(_env_file=None, KIMI_API_KEY="")  # type: ignore[call-arg]
+    monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    settings = AppSettings(_env_file=None, LLM_API_KEY="")  # type: ignore[call-arg]
     with patch("aipulse.summarizers.llm.AsyncOpenAI") as mock_client_cls:
         adapter = OpenAICompatibleAdapter(settings)
         assert adapter.base_url == DEFAULT_BASE_URL

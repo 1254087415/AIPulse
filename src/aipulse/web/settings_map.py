@@ -13,10 +13,10 @@ from aipulse.core.config import AppSettings
 
 # Field groups keyed by section name. Order is the order in the response.
 _SECTIONS: dict[str, tuple[str, ...]] = {
-    "kimi": (
-        "kimi_api_key",
-        "kimi_base_url",
-        "kimi_model",
+    "llm": (
+        "llm_api_key",
+        "llm_base_url",
+        "llm_model",
         "learning_notification_enabled",
     ),
     "obsidian": ("obsidian_vault_path", "obsidian_archive_folder"),

@@ -60,7 +60,7 @@ mcp__paseo__create_agent({
 
 **问题**：无论 `subagent` 还是 `detached` 标签，Paseo UI 都**只显示 finished 通知，看不到对话详情**。用户无法监督进度。
 
-### ✅ `paseo run -d` CLI（detached，UI 完全可见）
+### ✅ `paseo run -d` CLI（detached，UI 完全可见，B 组验证过）
 
 ```bash
 paseo run -d \
@@ -79,6 +79,24 @@ paseo run -d \
 - Paseo UI 显示完整对话（包括 tool 调用、推理、最终回执）
 - 用户能实时监督进度
 - detached = 顶层 root agent，不会被主会话 archive 链影响
+- **走主 checkout** = 用户当前分支直接干活，commit 进主分支
+
+### 可选 `--worktree <slug>`（仅需要隔离分支测试时）
+
+```bash
+paseo run -d --worktree verifier-spec09 \
+  ... 其他参数同上
+```
+
+**何时用**：
+- 需要独立 git worktree + 新分支（不动主 checkout WIP）
+- 例如 minimax worker / verifier-minimax 那种需要 405 个 dirty 不污染主分支的场景
+- **不是 UI 可见的必要条件**——B 组 spec 01-08 全部不带 `--worktree` 都成功 UI 可见
+
+**注意**（2026-07-26 教训）：
+- 我之前错误推断「必须 `--worktree` 才能 UI 可见」（受 minimax worker 误导）
+- 实际：B 组所有 agent（spec 01-08）都是 `paseo run -d`（无 `--worktree`），用户在 UI 全看到
+- minimax worker 用 `--worktree` 是因为它需要隔离分支做 kimi→MiniMax 重构，不是 UI 必要
 
 ---
 

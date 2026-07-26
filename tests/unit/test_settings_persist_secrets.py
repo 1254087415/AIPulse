@@ -26,26 +26,26 @@ def _build(tmp_path: Path) -> AppSettings:
     return AppSettings(
         data_dir=data_dir,
         download_dir=data_dir / "downloads",
-        KIMI_API_KEY="sk-kimi-TsxKEwaG4OKQFffbiXQtYKWUTutLbFtKlfaulZVEMFyI64fvcUiM2cQnkQVB49VK",
-        KIMI_BASE_URL="https://api.kimi.com/coding/v1",
-        KIMI_MODEL="kimi-for-coding",
+        LLM_API_KEY="sk-llm-TsxKEwaG4OKQFffbiXQtYKWUTutLbFtKlfaulZVEMFyI64fvcUiM2cQnkQVB49VK",
+        LLM_BASE_URL="https://api.minimaxi.com/v1",
+        LLM_MODEL="MiniMax-M2.5",
         wechat_appsecret="wechat-secret-aaaaaaaaaaaaaa",
         feishu_secret="feishu-secret-bbbbbbbbbbbbbb",
     )
 
 
-def test_save_masks_kimi_api_key_on_disk(tmp_path: Path) -> None:
+def test_save_masks_llm_api_key_on_disk(tmp_path: Path) -> None:
     settings = _build(tmp_path)
     settings.save()
 
     on_disk = json.loads(settings.settings_path.read_text(encoding="utf-8"))
-    raw = on_disk["kimi_api_key"]
+    raw = on_disk["llm_api_key"]
     # Mask: first4***last4
-    assert raw.startswith("sk-k")
+    assert raw.startswith("sk-l")
     assert raw.endswith("49VK")
     assert "***" in raw
     # Full real value must NOT appear on disk.
-    full_real = "sk-kimi-TsxKEwaG4OKQFffbiXQtYKWUTutLbFtKlfaulZVEMFyI64fvcUiM2cQnkQVB49VK"
+    full_real = "sk-llm-TsxKEwaG4OKQFffbiXQtYKWUTutLbFtKlfaulZVEMFyI64fvcUiM2cQnkQVB49VK"
     assert full_real not in settings.settings_path.read_text(encoding="utf-8")
 
 
@@ -78,8 +78,8 @@ def test_save_keeps_real_secret_in_memory(tmp_path: Path) -> None:
 
     # The in-memory secret is still the real value (no data loss).
     assert (
-        settings.kimi_api_key.get_secret_value()
-        == "sk-kimi-TsxKEwaG4OKQFffbiXQtYKWUTutLbFtKlfaulZVEMFyI64fvcUiM2cQnkQVB49VK"
+        settings.llm_api_key.get_secret_value()
+        == "sk-llm-TsxKEwaG4OKQFffbiXQtYKWUTutLbFtKlfaulZVEMFyI64fvcUiM2cQnkQVB49VK"
     )
 
 
@@ -88,5 +88,5 @@ def test_save_does_not_mask_non_secret_fields(tmp_path: Path) -> None:
     settings.save()
 
     on_disk = json.loads(settings.settings_path.read_text(encoding="utf-8"))
-    assert on_disk["kimi_base_url"] == "https://api.kimi.com/coding/v1"
-    assert on_disk["kimi_model"] == "kimi-for-coding"
+    assert on_disk["llm_base_url"] == "https://api.minimaxi.com/v1"
+    assert on_disk["llm_model"] == "MiniMax-M2.5"

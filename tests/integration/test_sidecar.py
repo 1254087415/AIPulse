@@ -73,15 +73,15 @@ async def test_sidecar_update_settings_persists(sidecar: Sidecar, tmp_path: Path
     result = await sidecar.handle_request(
         JsonRpcRequest(
             method="update_settings",
-            params={"kimi_model": "kimi-latest"},
+            params={"llm_model": "MiniMax-Text-01"},
         )
     )
     assert result.error is None
-    assert result.result["kimi_model"] == "kimi-latest"
+    assert result.result["llm_model"] == "MiniMax-Text-01"
     settings_file = tmp_path / "data" / "settings.json"
     assert settings_file.exists()
     persisted = json.loads(settings_file.read_text(encoding="utf-8"))
-    assert persisted["kimi_model"] == "kimi-latest"
+    assert persisted["llm_model"] == "MiniMax-Text-01"
 
 
 @pytest.mark.integration
@@ -132,7 +132,7 @@ async def test_sidecar_main_loop_with_mocked_stdio(
     responses = [json.loads(line) for line in stdout_lines if '"id":' in line]
     assert len(responses) == 2
     assert responses[0]["id"] == 1
-    assert responses[0]["result"]["kimi_model"] == "kimi-for-coding"
+    assert responses[0]["result"]["llm_model"] == "MiniMax-M2.5"
     assert responses[1]["id"] == 2
     assert "task_id" in responses[1]["result"]
 

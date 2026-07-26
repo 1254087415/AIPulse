@@ -31,19 +31,19 @@ os.environ.setdefault("AUTO_CREATE_TABLES", "true")
 # Override settings that may be loaded from the local .env file so that tests
 # observe the same values as the code defaults regardless of the developer's
 # environment configuration.
-os.environ["KIMI_BASE_URL"] = "https://api.kimi.com/coding/v1"
-os.environ["KIMI_MODEL"] = "kimi-for-coding"
+os.environ["LLM_BASE_URL"] = "https://api.minimaxi.com/v1"
+os.environ["LLM_MODEL"] = "MiniMax-M2.5"
 # Strip any real keys the developer might have in their .env so tests always
 # start from a known placeholder state.
-os.environ.pop("KIMI_API_KEY", None)
 os.environ.pop("LLM_API_KEY", None)
+os.environ.pop("KIMI_API_KEY", None)
 # Provide placeholder secrets so build_agent_executor() can construct the
 # ChatOpenAI client without the underlying OpenAI SDK complaining about a
 # missing api_key (it falls back to OPENAI_API_KEY env var, raising OpenAIError
 # if neither is set). Placeholders are ignored by tests via test isolation
 # fixtures; production code paths run only when the real key has been provided
 # through PATCH /api/settings.
-os.environ["KIMI_API_KEY"] = "sk-test-placeholder-kimi"
+os.environ["LLM_API_KEY"] = "sk-test-placeholder-llm"
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-placeholder-openai")
 
 

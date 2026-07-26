@@ -5,9 +5,9 @@ import { getSettings, patchSettings, type SettingsResponse } from '../api/settin
 interface Settings {
   obsidian_vault_path: string
   obsidian_archive_folder: string
-  kimi_api_key: string
-  kimi_base_url: string
-  kimi_model: string
+  llm_api_key: string
+  llm_base_url: string
+  llm_model: string
   feishu_webhook_url: string
   feishu_secret: string
   wechat_appid: string
@@ -24,7 +24,7 @@ interface PanelState {
 }
 
 const PASSWORD_FIELDS = new Set([
-  'kimi_api_key',
+  'llm_api_key',
   'feishu_secret',
   'wechat_appsecret',
 ])
@@ -32,9 +32,9 @@ const PASSWORD_FIELDS = new Set([
 const settings = reactive<Settings>({
   obsidian_vault_path: '',
   obsidian_archive_folder: 'AIPulse',
-  kimi_api_key: '',
-  kimi_base_url: 'https://api.kimi.com/coding/v1',
-  kimi_model: 'kimi-for-coding',
+  llm_api_key: '',
+  llm_base_url: 'https://api.minimaxi.com/v1',
+  llm_model: 'MiniMax-M2.5',
   feishu_webhook_url: '',
   feishu_secret: '',
   wechat_appid: '',
@@ -51,7 +51,7 @@ const expanded = ref<PanelState>({
 })
 
 const passwordVisible = ref<Record<string, boolean>>({
-  kimi_api_key: false,
+  llm_api_key: false,
   feishu_secret: false,
   wechat_appsecret: false,
 })
@@ -89,9 +89,9 @@ function isMaskedSecret(value: string): boolean {
 let initialSnapshot: Record<string, string> = {}
 
 function applySettings(data: SettingsResponse): void {
-  settings.kimi_api_key = data.kimi?.kimi_api_key ?? ''
-  settings.kimi_base_url = data.kimi?.kimi_base_url ?? settings.kimi_base_url
-  settings.kimi_model = data.kimi?.kimi_model ?? settings.kimi_model
+  settings.llm_api_key = data.llm?.llm_api_key ?? ''
+  settings.llm_base_url = data.llm?.llm_base_url ?? settings.llm_base_url
+  settings.llm_model = data.llm?.llm_model ?? settings.llm_model
   settings.obsidian_vault_path = data.obsidian?.obsidian_vault_path ?? ''
   settings.obsidian_archive_folder =
     data.obsidian?.obsidian_archive_folder ?? settings.obsidian_archive_folder
@@ -239,31 +239,31 @@ onUnmounted(() => {
           @click="togglePanel('llm')"
         >
           <span class="panel-icon" aria-hidden="true">{{ expanded.llm ? '▼' : '▶' }}</span>
-          <span class="panel-title">Kimi Code LLM</span>
+          <span class="panel-title">LLM</span>
         </button>
         <div class="panel-body">
-          <label for="kimi-api-key">API Key</label>
+          <label for="llm-api-key">API Key</label>
           <div class="password-field">
             <input
-              id="kimi-api-key"
-              v-model="settings.kimi_api_key"
-              :type="getInputType('kimi_api_key')"
+              id="llm-api-key"
+              v-model="settings.llm_api_key"
+              :type="getInputType('llm_api_key')"
             />
             <button
               type="button"
               class="toggle-password"
-              data-testid="toggle-kimi-api-key"
-              @click="togglePassword('kimi_api_key')"
+              data-testid="toggle-llm-api-key"
+              @click="togglePassword('llm_api_key')"
             >
-              {{ passwordVisible.kimi_api_key ? '隐藏' : '显示' }}
+              {{ passwordVisible.llm_api_key ? '隐藏' : '显示' }}
             </button>
           </div>
 
-          <label for="kimi-base-url">Base URL</label>
-          <input id="kimi-base-url" v-model="settings.kimi_base_url" type="text" />
+          <label for="llm-base-url">Base URL</label>
+          <input id="llm-base-url" v-model="settings.llm_base_url" type="text" />
 
-          <label for="kimi-model">Model</label>
-          <input id="kimi-model" v-model="settings.kimi_model" type="text" />
+          <label for="llm-model">Model</label>
+          <input id="llm-model" v-model="settings.llm_model" type="text" />
         </div>
       </div>
 

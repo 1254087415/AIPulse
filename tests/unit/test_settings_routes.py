@@ -2,7 +2,7 @@
 
 Covers:
   - GET returns masked secrets (apikey never leaked in full)
-  - GET groups fields by section (kimi / obsidian / wechat / feishu)
+  - GET groups fields by section (llm / obsidian / wechat / feishu)
   - PATCH empty / masked secret preserves existing value
   - PATCH new value persists and is observable via to_client_dict
   - PATCH invalid obsidian vault path raises 400
@@ -27,7 +27,7 @@ RESET_SETTINGS_TARGET = "aipulse.web.routes.reset_global_settings"
 
 def _build_settings(
     *,
-    kimi_key: str = "sk-initial-kimi-1234567890",
+    llm_key: str = "sk-initial-llm-1234567890",
     obsidian_path: str | None = None,
     wechat_secret: str = "wechat-initial-1234567890",
     feishu_secret: str = "feishu-initial-1234567890",
@@ -55,9 +55,9 @@ def _build_settings(
     return AppSettings(
         data_dir=data_dir,
         download_dir=data_dir / "downloads",
-        KIMI_API_KEY=kimi_key,
-        KIMI_BASE_URL="https://api.kimi.com/coding/v1",
-        KIMI_MODEL="kimi-for-coding",
+        LLM_API_KEY=llm_key,
+        LLM_BASE_URL="https://api.minimaxi.com/v1",
+        LLM_MODEL="MiniMax-M2.5",
         obsidian_vault_path=Path(obsidian_path),
         obsidian_archive_folder="AIPulse",
         wechat_appid="wx-test",
@@ -77,11 +77,11 @@ async def test_get_settings_masks_secrets(tmp_path: Path) -> None:
     data = response["data"]
 
     # Real value never exposed; mask format: first4 + "***" + last4
-    kimi_value = data["kimi"]["kimi_api_key"]
-    assert "sk-initial" not in kimi_value
-    assert "1234567890" not in kimi_value  # body hidden
-    assert "***" in kimi_value
-    assert kimi_value.startswith("sk-i") and kimi_value.endswith("7890")
+    llm_value = data["llm"]["llm_api_key"]
+    assert "sk-initial" not in llm_value
+    assert "1234567890" not in llm_value  # body hidden
+    assert "***" in llm_value
+    assert llm_value.startswith("sk-i") and llm_value.endswith("7890")
 
     wechat_value = data["wechat"]["wechat_appsecret"]
     assert "***" in wechat_value
@@ -98,11 +98,11 @@ async def test_get_settings_groups_by_section(tmp_path: Path) -> None:
 
     data = response["data"]
     # Required sections per spec §5.3
-    assert set(data.keys()) >= {"kimi", "obsidian", "wechat", "feishu"}
+    assert set(data.keys()) >= {"llm", "obsidian", "wechat", "feishu"}
 
     # Each section groups its own fields only
-    assert "kimi_api_key" in data["kimi"]
-    assert "kimi_model" in data["kimi"]
+    assert "llm_api_key" in data["llm"]
+    assert "llm_model" in data["llm"]
     assert "obsidian_vault_path" in data["obsidian"]
     assert "wechat_appid" in data["wechat"]
     assert "feishu_webhook_url" in data["feishu"]
@@ -110,10 +110,10 @@ async def test_get_settings_groups_by_section(tmp_path: Path) -> None:
 
 async def test_get_settings_short_secret_is_fully_masked(tmp_path: Path) -> None:
     """Secrets shorter than 8 chars get fully masked to '***' (no prefix leak)."""
-    settings = _build_settings(tmp_path=tmp_path, kimi_key="short")
+    settings = _build_settings(tmp_path=tmp_path, llm_key="short")
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         response = await get_settings_route()
-    assert response["data"]["kimi"]["kimi_api_key"] == "***"
+    assert response["data"]["llm"]["llm_api_key"] == "***"
 
 
 async def test_patch_settings_empty_secret_preserves_value(tmp_path: Path) -> None:
@@ -123,9 +123,9 @@ async def test_patch_settings_empty_secret_preserves_value(tmp_path: Path) -> No
     and returns self. The original instance's secret is preserved because
     empty/masked values short-circuit out of the secret-mutation branch.
     """
-    settings = _build_settings(tmp_path=tmp_path, kimi_key="sk-keep-me-9999888877776666")
+    settings = _build_settings(tmp_path=tmp_path, llm_key="sk-keep-me-9999888877776666")
     payload = MagicMock()
-    payload.model_dump = MagicMock(return_value={"kimi_api_key": ""})
+    payload.model_dump = MagicMock(return_value={"llm_api_key": ""})
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         with patch(RESET_SETTINGS_TARGET) as mock_reset:
@@ -137,29 +137,29 @@ async def test_patch_settings_empty_secret_preserves_value(tmp_path: Path) -> No
     assert response["success"] is True
     # Original instance's secret is preserved (in-memory update skips it
     # when value is empty or masked).
-    assert settings.kimi_api_key.get_secret_value() == "sk-keep-me-9999888877776666"
+    assert settings.llm_api_key.get_secret_value() == "sk-keep-me-9999888877776666"
     # The response must NOT leak the real value (it must show the masked form)
-    kimi_value = response["data"]["kimi"]["kimi_api_key"]
-    assert "sk-keep-me" not in kimi_value
-    assert "***" in kimi_value
+    llm_value = response["data"]["llm"]["llm_api_key"]
+    assert "sk-keep-me" not in llm_value
+    assert "***" in llm_value
 
 
 async def test_patch_settings_masked_secret_preserves_value(tmp_path: Path) -> None:
     """Masked placeholder like 'sk-***90' must NOT overwrite the real secret."""
-    settings = _build_settings(tmp_path=tmp_path, kimi_key="sk-keep-me-9999888877776666")
+    settings = _build_settings(tmp_path=tmp_path, llm_key="sk-keep-me-9999888877776666")
     payload = MagicMock()
-    payload.model_dump = MagicMock(return_value={"kimi_api_key": "sk-***66"})
+    payload.model_dump = MagicMock(return_value={"llm_api_key": "sk-***66"})
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         with patch(RESET_SETTINGS_TARGET):
             response = await patch_settings_route(payload)
 
     # Original instance untouched
-    assert settings.kimi_api_key.get_secret_value() == "sk-keep-me-9999888877776666"
+    assert settings.llm_api_key.get_secret_value() == "sk-keep-me-9999888877776666"
     # Response shows the mask, not the literal "sk-***66"
-    kimi_value = response["data"]["kimi"]["kimi_api_key"]
-    assert "sk-keep-me" not in kimi_value
-    assert "***" in kimi_value
+    llm_value = response["data"]["llm"]["llm_api_key"]
+    assert "sk-keep-me" not in llm_value
+    assert "***" in llm_value
 
 
 async def test_patch_settings_new_secret_overwrites(tmp_path: Path) -> None:
@@ -170,10 +170,10 @@ async def test_patch_settings_new_secret_overwrites(tmp_path: Path) -> None:
     cached singleton in place — the next GET picks up the new value
     without a cache clear.
     """
-    settings = _build_settings(tmp_path=tmp_path, kimi_key="sk-old-value-1234567890")
+    settings = _build_settings(tmp_path=tmp_path, llm_key="sk-old-value-1234567890")
     payload = MagicMock()
     payload.model_dump = MagicMock(
-        return_value={"kimi_api_key": "sk-new-value-0987654321"}
+        return_value={"llm_api_key": "sk-new-value-0987654321"}
     )
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
@@ -183,27 +183,27 @@ async def test_patch_settings_new_secret_overwrites(tmp_path: Path) -> None:
     assert response["success"] is True
     mock_reset.assert_not_called()
     # Response shows the NEW value (still masked)
-    kimi_value = response["data"]["kimi"]["kimi_api_key"]
-    assert "sk-new-value" not in kimi_value
-    assert kimi_value.startswith("sk-n") and kimi_value.endswith("4321")
+    llm_value = response["data"]["llm"]["llm_api_key"]
+    assert "sk-new-value" not in llm_value
+    assert llm_value.startswith("sk-n") and llm_value.endswith("4321")
     # The cached singleton now holds the new secret
-    assert settings.kimi_api_key.get_secret_value() == "sk-new-value-0987654321"
+    assert settings.llm_api_key.get_secret_value() == "sk-new-value-0987654321"
 
 
 async def test_patch_settings_updates_non_secret_field(tmp_path: Path) -> None:
     settings = _build_settings(tmp_path=tmp_path)
     payload = MagicMock()
     payload.model_dump = MagicMock(
-        return_value={"kimi_model": "kimi-k2-thinking", "kimi_api_key": ""}
+        return_value={"llm_model": "MiniMax-Text-01", "llm_api_key": ""}
     )
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         with patch(RESET_SETTINGS_TARGET):
             response = await patch_settings_route(payload)
 
-    assert response["data"]["kimi"]["kimi_model"] == "kimi-k2-thinking"
-    # Original kimi key untouched (immutable contract)
-    assert settings.kimi_api_key.get_secret_value() == "sk-initial-kimi-1234567890"
+    assert response["data"]["llm"]["llm_model"] == "MiniMax-Text-01"
+    # Original llm key untouched (immutable contract)
+    assert settings.llm_api_key.get_secret_value() == "sk-initial-llm-1234567890"
 
 
 async def test_patch_settings_invalid_obsidian_path_returns_422(tmp_path: Path) -> None:
@@ -261,14 +261,14 @@ async def test_patch_settings_obsidian_path_empty_passes(tmp_path: Path) -> None
     from aipulse.web.schemas import SettingsUpdate
 
     settings = _build_settings(tmp_path=tmp_path)
-    payload = SettingsUpdate(kimi_model="kimi-k2-thinking")
+    payload = SettingsUpdate(llm_model="MiniMax-Text-01")
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         with patch(RESET_SETTINGS_TARGET):
             response = await patch_settings_route(payload)
 
     assert response["success"] is True
-    assert settings.kimi_model == "kimi-k2-thinking"
+    assert settings.llm_model == "MiniMax-Text-01"
 
 
 async def test_patch_settings_response_returns_masked_secrets(tmp_path: Path) -> None:
@@ -276,13 +276,13 @@ async def test_patch_settings_response_returns_masked_secrets(tmp_path: Path) ->
     settings = _build_settings(tmp_path=tmp_path)
     payload = MagicMock()
     payload.model_dump = MagicMock(
-        return_value={"kimi_api_key": "sk-brand-new-key-aaaaaaaaaa"}
+        return_value={"llm_api_key": "sk-brand-new-key-aaaaaaaaaa"}
     )
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         with patch(RESET_SETTINGS_TARGET):
             response = await patch_settings_route(payload)
 
-    kimi_value = response["data"]["kimi"]["kimi_api_key"]
-    assert "sk-brand-new-key" not in kimi_value
-    assert "***" in kimi_value
+    llm_value = response["data"]["llm"]["llm_api_key"]
+    assert "sk-brand-new-key" not in llm_value
+    assert "***" in llm_value

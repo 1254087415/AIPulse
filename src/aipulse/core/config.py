@@ -5,15 +5,15 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
 _SECRET_KEYS = {
-    "kimi_api_key",
+    "llm_api_key",
     "feishu_secret",
     "wechat_appsecret",
     "wechat_bot_token",
@@ -41,21 +41,22 @@ class AppSettings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/aipulse.db"
     auto_create_tables: bool = False
 
-    # LLM (Kimi) — single source of truth. Legacy ``llm_*`` env names
-    # (``LLM_API_KEY``/``LLM_BASE_URL``/``LLM_MODEL``) are still accepted via
-    # ``validation_alias`` for backward compatibility with existing .env files.
+    # LLM (Minimax via minimaxi.com) — single source of truth. v0.4 minimax
+    # switch: field renamed from kimi_* to llm_* + dropped KIMI_* alias.
+    # Legacy persisted settings.json keys (kimi_*/minimax_*) are migrated to
+    # llm_* on first load (see _load_persisted).
     llm_provider: str = "openai"
-    kimi_api_key: SecretStr = Field(
+    llm_api_key: SecretStr = Field(
         default=SecretStr(""),
-        validation_alias=AliasChoices("KIMI_API_KEY", "LLM_API_KEY"),
+        validation_alias="LLM_API_KEY",
     )
-    kimi_base_url: str = Field(
-        default="https://api.kimi.com/coding/v1",
-        validation_alias=AliasChoices("KIMI_BASE_URL", "LLM_BASE_URL"),
+    llm_base_url: str = Field(
+        default="https://api.minimaxi.com/v1",
+        validation_alias="LLM_BASE_URL",
     )
-    kimi_model: str = Field(
-        default="kimi-for-coding",
-        validation_alias=AliasChoices("KIMI_MODEL", "LLM_MODEL"),
+    llm_model: str = Field(
+        default="MiniMax-M2.5",
+        validation_alias="LLM_MODEL",
     )
     learning_notification_enabled: bool = True
 
@@ -131,8 +132,10 @@ class AppSettings(BaseSettings):
             except Exception:  # noqa: BLE001 — defensive: never block init
                 logger.exception("Failed to merge persisted settings")
 
+    _llm_migration_done: ClassVar[bool] = False
+
     def _load_persisted(self) -> dict[str, Any]:
-        """Read data/settings.json if present and return only known keys."""
+        """Read data/settings.json and migrate legacy kimi_*/minimax_* → llm_*."""
         path = self.settings_path
         if not path.exists():
             return {}
@@ -143,9 +146,57 @@ class AppSettings(BaseSettings):
             return {}
         if not isinstance(raw, dict):
             return {}
+
+        # One-shot migration per process: legacy kimi_*/minimax_* → llm_*.
+        # minimax_* is the most recent pre-migration configuration state, so
+        # it wins over kimi_* when both are present. Drop leftover copies so
+        # the on-disk file does not keep redundant legacy keys.
+        if not self._llm_migration_done:
+            legacy_aliases: tuple[dict[str, str], ...] = (
+                {
+                    "minimax_api_key": "llm_api_key",
+                    "minimax_base_url": "llm_base_url",
+                    "minimax_model": "llm_model",
+                },
+                {
+                    "kimi_api_key": "llm_api_key",
+                    "kimi_base_url": "llm_base_url",
+                    "kimi_model": "llm_model",
+                },
+            )
+            for legacy in legacy_aliases:
+                for old_key, new_key in legacy.items():
+                    if old_key in raw and new_key not in raw:
+                        raw[new_key] = raw.pop(old_key)
+                    elif old_key in raw:
+                        raw.pop(old_key, None)
+            try:
+                self._write_persisted(raw)
+            except OSError:
+                logger.exception(
+                    "Failed to persist migrated settings at %s", path,
+                )
+            AppSettings._llm_migration_done = True
+
         # Drop unknown keys so we don't re-introduce removed fields.
         valid = set(self.model_dump().keys())
         return {k: v for k, v in raw.items() if k in valid}
+
+    def _write_persisted(self, raw: dict[str, Any]) -> None:
+        """Persist a raw settings dict to data/settings.json.
+
+        Masked secrets are filtered out so the masked value never round-trips
+        to disk; unmasked values are written as-is.
+        """
+        payload = {
+            k: v
+            for k, v in raw.items()
+            if k not in _SECRET_KEYS or not self._is_masked_secret(v)
+        }
+        self.settings_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
 
     @property
     def scripts_dir(self) -> Path:
@@ -195,8 +246,8 @@ class AppSettings(BaseSettings):
         # Only persist keys that may be changed at runtime.
         persist_keys = {
             "llm_provider",
-            "kimi_base_url",
-            "kimi_model",
+            "llm_base_url",
+            "llm_model",
             "learning_notification_enabled",
             "whisper_model",
             "obsidian_vault_path",
@@ -331,3 +382,4 @@ def get_settings() -> AppSettings:
 def reset_settings() -> None:
     """Clear the cached settings instance (useful in tests)."""
     get_settings.cache_clear()
+    AppSettings._llm_migration_done = False

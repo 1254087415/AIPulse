@@ -10,7 +10,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是 AIPulse 的视频学习助手，负责把 B �
 你可以按顺序调用以下 6 个工具完成一次总结：
 
 1. `fetch_transcript(video_id)` — 拉取视频字幕并落盘到 ``data/cache/transcripts/<video_id>.md``，返回字幕文件绝对路径（**单参数**）
-2. `summarize(video_id, transcript_path, extra_context)` — 从字幕文件读出文本，调 Kimi 生成结构化总结（**多参数，transcript_path 必传**，路径来自 fetch_transcript 的返回值）
+2. `summarize(video_id, transcript_path, extra_context)` — 从字幕文件读出文本，调 LLM 生成结构化总结（**多参数，transcript_path 必传**，路径来自 fetch_transcript 的返回值）
 3. `judge_tech_relevance(markdown)` — 判定视频是否值得学习归档（**单参数**）
 4. `create_obsidian_note(video_id, markdown, title, up_name)` — 写入 Obsidian（**多参数**）
 5. `create_learning_event(video_id, note_path, scheduled_at, topic)` — 写 DB（**多参数**）
@@ -35,7 +35,7 @@ Action: fetch_transcript
 Action Input: BV14x726XEha
 
 示例 2（正确 · 多参数 summarize，把字幕文件绝对路径传进去。字幕原文很大，不要塞 Action Input）：
-Thought: 已拿到字幕文件路径，下一步调 summarize 让 Kimi 从文件读出文本并生成结构化总结
+Thought: 已拿到字幕文件路径，下一步调 summarize 让 LLM 从文件读出文本并生成结构化总结
 Action: summarize
 Action Input: {"video_id": "BV14x726XEha", "transcript_path": "/Users/zab/Documents/project/AIPulse/data/cache/transcripts/BV14x726XEha.md", "extra_context": "标题：xxx；UP主：yyy"}
 
@@ -78,7 +78,7 @@ video_id: {video_id}
 title: {title}
 up_name: {up_name}
 summarized_at: {ISO timestamp}
-model: kimi-for-coding
+model: MiniMax-M2.5
 ---
 
 # {title}
@@ -126,7 +126,7 @@ topic 取自总结 TL;DR 第一行（去掉 markdown 标记后截断到 30 字�
 
 
 def build_summary_prompt(transcript: str, extra_context: str = "") -> str:
-    """User prompt: hand transcript + context to Kimi for structured summary."""
+    """User prompt: hand transcript + context to LLM for structured summary."""
     return f"""请按 SYSTEM 规则把以下视频字幕转成结构化总结笔记。
 
 ## 视频上下文
@@ -141,7 +141,7 @@ def build_summary_prompt(transcript: str, extra_context: str = "") -> str:
 
 
 def build_judge_prompt(markdown: str) -> str:
-    """User prompt: ask Kimi whether the summary is worth archiving (returns JSON)."""
+    """User prompt: ask LLM whether the summary is worth archiving (returns JSON)."""
     return f"""请按以下标准判定下面这篇视频总结是否值得用户花时间学习归档。
 
 ## 判定标准

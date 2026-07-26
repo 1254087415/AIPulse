@@ -62,7 +62,7 @@ AIPulse 由四个子系统组成，共享同一个 Python 后端：
 - [x] 视频平台解析：YouTube / Bilibili / 抖音 / 小红书 / 通用网页（策略 + 注册表）
 - [x] 字幕获取：Bilibili 官方字幕、yt-dlp 内嵌字幕、faster-whisper 本地 ASR 兜底
 - [x] 文章提取：微信公众号 / 普通网页
-- [x] LLM 摘要（OpenAI 兼容接口，默认 kimi-for-coding）
+- [x] LLM 摘要（OpenAI 兼容接口，默认 MiniMax-M2.5 via minimax）
 - [x] Obsidian 归档（源笔记 + 总结笔记，双向链接）
 - [x] 飞书 Webhook、微信公众号模板消息推送
 - [x] RSS 订阅与同步
@@ -103,7 +103,7 @@ AIPulse 由四个子系统组成，共享同一个 Python 后端：
 | 热点看板存储 | MySQL（aiomysql / pymysql） |
 | 视频下载 | yt-dlp |
 | 转写 | faster-whisper |
-| 摘要 | OpenAI 兼容接口（默认 kimi-for-coding） |
+| 摘要 | OpenAI 兼容接口（默认 MiniMax-M2.5 via minimax） |
 | 实时通信 | SSE |
 | 包管理 | uv（Python）、npm / pnpm（前端） |
 

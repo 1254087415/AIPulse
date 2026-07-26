@@ -39,14 +39,14 @@ Thought: {agent_scratchpad}"""
 
 
 def _build_chat_model():
-    """Build a ChatOpenAI-compatible LangChain chat model using the Kimi endpoint.
+    """Build a ChatOpenAI-compatible LangChain chat model for the LLM endpoint.
 
     Note on `api_key=None`: the underlying OpenAI SDK enforces that `api_key`
     is set at construction time (it falls back to the `OPENAI_API_KEY` env var,
     failing with `openai.OpenAIError` when neither is present). To keep
     ``build_agent_executor()`` callable in test / startup paths where no key
     has been configured yet, we substitute a sentinel placeholder. Real
-    invocations reach the Kimi endpoint only when a PATCH /api/settings or
+    invocations reach the LLM endpoint only when a PATCH /api/settings or
     ``.env`` has populated an actual key — at which point the placeholder is
     replaced by the real value on the next ``build_agent_executor()`` call.
     """
@@ -55,17 +55,17 @@ def _build_chat_model():
     from langchain_openai import ChatOpenAI
 
     settings = get_settings()
-    api_key = settings.kimi_api_key.get_secret_value()
+    api_key = settings.llm_api_key.get_secret_value()
     if not api_key:
         api_key = "sk-placeholder-for-build"
-    base_url = settings.kimi_base_url
-    model = settings.kimi_model
+    base_url = settings.llm_base_url
+    model = settings.llm_model
 
     return ChatOpenAI(
         base_url=base_url,
         api_key=api_key,
         model=model,
-        temperature=1.0,  # Kimi kimi-for-coding only supports 1.0
+        temperature=1.0,
     )
 
 

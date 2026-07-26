@@ -767,7 +767,7 @@ class TestCreateObsidianNote:
         settings = MagicMock()
         settings.obsidian_vault_path = Path("/Users/xxx/Documents/Obsidian Vault")  # 不存在路径
         settings.obsidian_archive_folder = "AIPulse"
-        settings.kimi_model = "kimi-for-coding"
+        settings.llm_model = "MiniMax-M2.5"
 
         with patch("aipulse.summarizers.agent.tools.get_settings", return_value=settings):
             result = await create_obsidian_note.ainvoke(
@@ -790,7 +790,7 @@ class TestCreateObsidianNote:
         settings = MagicMock()
         settings.obsidian_vault_path = tmp_path
         settings.obsidian_archive_folder = "AIPulse"
-        settings.kimi_model = "kimi-for-coding"
+        settings.llm_model = "MiniMax-M2.5"
 
         with patch("aipulse.summarizers.agent.tools.get_settings", return_value=settings):
             result = await create_obsidian_note.ainvoke(
@@ -812,7 +812,7 @@ class TestCreateObsidianNote:
         content = note_path.read_text(encoding="utf-8")
         assert content.startswith("---\n")
         assert "video_id: BV1abc" in content
-        assert "model: kimi-for-coding" in content
+        assert "model: MiniMax-M2.5" in content
         # 原始 markdown 保留
         assert "# Hello" in content
 
@@ -824,7 +824,7 @@ class TestCreateObsidianNote:
         settings = MagicMock()
         settings.obsidian_vault_path = tmp_path
         settings.obsidian_archive_folder = "AIPulse"
-        settings.kimi_model = "kimi-for-coding"
+        settings.llm_model = "MiniMax-M2.5"
 
         with patch("aipulse.summarizers.agent.tools.get_settings", return_value=settings):
             existing = "---\nfoo: bar\n---\n\n# Body"
@@ -850,7 +850,7 @@ class TestCreateObsidianNote:
         settings = MagicMock()
         settings.obsidian_vault_path = tmp_path
         settings.obsidian_archive_folder = "AIPulse"
-        settings.kimi_model = "kimi-for-coding"
+        settings.llm_model = "MiniMax-M2.5"
 
         with patch("aipulse.summarizers.agent.tools.get_settings", return_value=settings):
             long_title = "A" * 200
@@ -875,7 +875,7 @@ class TestCreateObsidianNote:
         settings = MagicMock()
         settings.obsidian_vault_path = tmp_path
         settings.obsidian_archive_folder = "AIPulse"
-        settings.kimi_model = "kimi-for-coding"
+        settings.llm_model = "MiniMax-M2.5"
 
         with patch("aipulse.summarizers.agent.tools.get_settings", return_value=settings):
             result = await create_obsidian_note.ainvoke(

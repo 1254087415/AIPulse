@@ -1,16 +1,16 @@
 /**
  * Settings API client — typed wrapper around `/api/settings`.
  *
- * GET returns the grouped form (`{kimi, obsidian, wechat, feishu}`).
+ * GET returns the grouped form (`{llm, obsidian, wechat, feishu}`).
  * PATCH accepts the flat form and updates any subset of fields.
  */
 
 import { apiFetch } from '../lib/apiFetch'
 
-export interface KimiGroup {
-  kimi_api_key: string
-  kimi_base_url: string
-  kimi_model: string
+export interface LlmGroup {
+  llm_api_key: string
+  llm_base_url: string
+  llm_model: string
   learning_notification_enabled: boolean
 }
 
@@ -37,16 +37,16 @@ export interface FeishuGroup {
 }
 
 export interface SettingsResponse {
-  kimi: KimiGroup
+  llm: LlmGroup
   obsidian: ObsidianGroup
   wechat: WechatGroup
   feishu: FeishuGroup
 }
 
 export type SettingsPatch = Partial<{
-  kimi_api_key: string
-  kimi_base_url: string
-  kimi_model: string
+  llm_api_key: string
+  llm_base_url: string
+  llm_model: string
   learning_notification_enabled: boolean
   obsidian_vault_path: string
   obsidian_archive_folder: string

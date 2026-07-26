@@ -2,7 +2,7 @@
 
 6 个 @tool 装饰器：
   1. fetch_transcript — 拉 B 站字幕
-  2. summarize — 调 Kimi 生成结构化总结
+  2. summarize — 调 LLM 生成结构化总结
   3. judge_tech_relevance — 判定是否值得归档
   4. create_obsidian_note — 写 Obsidian vault
   5. create_learning_event — 写 DB
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 class FetchTranscriptInput(BaseModel):
     """Arg schema for fetch_transcript.
 
-    L2#2 (2026-07-26) 签约修复：Kimi ReAct 偶尔会把整段
+    L2#2 (2026-07-26) 签约修复：LLM ReAct 偶尔会把整段
     ``{"video_id": "BV..."}`` dict 序列化成 Action.input 传入。LangChain
     默认 args_schema 是 ``video_id: str``，会在 BaseModel 校验阶段抛
     ``ValidationError`` 然后 ReAct parser 抛
@@ -410,13 +410,13 @@ def _compute_estimated_minutes(video_id: str) -> int:
 
 
 # =====================================================================
-# Tool 2 — summarize (调 Kimi)
+# Tool 2 — summarize (调 LLM)
 # =====================================================================
 class SummarizeInput(BaseModel):
     """Arg schema for summarize.
 
     R5-C 续 (2026-07-26)：summarize 现在接 ``transcript_path`` + ``video_id`` +
-    ``extra_context`` 三个字段。Kimi ReAct parser 不稳定时会偶发把整个
+    ``extra_context`` 三个字段。LLM ReAct parser 不稳定时会偶发把整个
     ``{"video_id": "...", "transcript_path": "..."}`` dict 序列化成
     Action.input 一个字段（典型：把 fetch_transcript 返回的字幕全文 + 标题 / UP主
     拼成 ``{"video_id": "{...标题：；UP主：}"}`` 塞给 summarize.video_id）。
@@ -471,7 +471,7 @@ async def summarize(
     transcript_path: str | None = None,
     extra_context: str = "",
 ) -> dict[str, Any]:
-    """从字幕文件读出文本，调 Kimi 生成结构化 Markdown 总结。
+    """从字幕文件读出文本，调 LLM 生成结构化 Markdown 总结。
 
     R5-C (2026-07-26)：summarize 不再接 ``transcript`` 字符串，而是接
     ``transcript_path``（来自 fetch_transcript 返回值）。这样 ReAct
@@ -480,7 +480,7 @@ async def summarize(
 
     R5-C 续：transcript_path 函数签名改为 ``str | None = None`` 而不是
     ``str`` —— LangChain ``StructuredTool._arun`` 直接 ``coroutine(*args, **kwargs)``，
-    Kimi ReAct parser 漏字段时不会用 None 默认填 → TypeError missing argument。
+    LLM ReAct parser 漏字段时不会用 None 默认填 → TypeError missing argument。
     函数体继续强校验 transcript_path 非空（``if not transcript_path: return {ok: False}``），
     业务契约保持。
 
@@ -491,7 +491,7 @@ async def summarize(
     Returns:
         {ok, markdown, model, usage, error?, transcript_path}
     """
-    # 兜底：Kimi ReAct parser 不稳时会把 dict / list 整个塞进来。
+    # 兜底：LLM ReAct parser 不稳时会把 dict / list 整个塞进来。
     if video_id is None:
         return {"ok": False, "error": "video_id 必传"}
     if not isinstance(video_id, str):
@@ -540,8 +540,8 @@ async def summarize(
     try:
         adapter = OpenAICompatibleAdapter(
             settings=settings,
-            base_url=settings.kimi_base_url,
-            model=settings.kimi_model,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
         )
         prompt = build_summary_prompt(
             transcript=transcript_text, extra_context=extra_context
@@ -553,21 +553,21 @@ async def summarize(
         return {
             "ok": True,
             "markdown": markdown,
-            "model": settings.kimi_model,
+            "model": settings.llm_model,
             "usage": {},
             "transcript_path": transcript_path,
         }
     except asyncio.TimeoutError:
         return {
             "ok": False,
-            "error": "Kimi 调用超时（180s）",
+            "error": "LLM 调用超时（180s）",
             "transcript_path": transcript_path,
         }
     except Exception as exc:  # noqa: BLE001
         logger.exception("summarize failed for %s", video_id)
         return {
             "ok": False,
-            "error": f"Kimi 调用失败：{exc!s}",
+            "error": f"LLM 调用失败：{exc!s}",
             "transcript_path": transcript_path,
         }
 
@@ -588,8 +588,8 @@ async def judge_tech_relevance(markdown: str) -> dict[str, Any]:
     try:
         adapter = OpenAICompatibleAdapter(
             settings=settings,
-            base_url=settings.kimi_base_url,
-            model=settings.kimi_model,
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
         )
         prompt = build_judge_prompt(markdown=markdown)
         raw = await asyncio.wait_for(adapter.complete(prompt=prompt), timeout=60.0)
@@ -640,7 +640,7 @@ async def create_obsidian_note(
             f"title: {title}\n"
             f"up_name: {up_name}\n"
             f"summarized_at: {datetime.now(UTC).isoformat()}\n"
-            f"model: {settings.kimi_model}\n"
+            f"model: {settings.llm_model}\n"
             f"---\n\n"
         )
         # 若 markdown 已有 frontmatter，跳过注入

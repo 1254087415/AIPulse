@@ -8,14 +8,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class KimiSettings(BaseModel):
-    """Kimi (LLM) related settings; secrets are masked in responses."""
+class LlmSettings(BaseModel):
+    """LLM (Minimax via minimaxi.com) related settings; secrets are masked in responses."""
 
     model_config = ConfigDict(extra="ignore")
 
-    kimi_api_key: str = Field(default="", description="Masked placeholder when populated")
-    kimi_base_url: str = ""
-    kimi_model: str = ""
+    llm_api_key: str = Field(default="", description="Masked placeholder when populated")
+    llm_base_url: str = ""
+    llm_model: str = ""
     learning_notification_enabled: bool = True
 
 
@@ -61,7 +61,7 @@ class SettingsResponse(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    kimi: dict[str, Any] = Field(default_factory=dict)
+    llm: dict[str, Any] = Field(default_factory=dict)
     obsidian: dict[str, Any] = Field(default_factory=dict)
     wechat: dict[str, Any] = Field(default_factory=dict)
     feishu: dict[str, Any] = Field(default_factory=dict)
@@ -77,10 +77,10 @@ class SettingsUpdate(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    # Kimi
-    kimi_api_key: str | None = None
-    kimi_base_url: str | None = None
-    kimi_model: str | None = None
+    # LLM
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
+    llm_model: str | None = None
     learning_notification_enabled: bool | None = None
 
     # Obsidian
