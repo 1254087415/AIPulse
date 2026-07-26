@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted, onUnmounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { getSettings, patchSettings, type SettingsResponse } from '../api/settings'
 
 interface Settings {
   obsidian_vault_path: string
   obsidian_archive_folder: string
-  llm_api_key: string
-  llm_base_url: string
-  llm_model: string
+  kimi_api_key: string
+  kimi_base_url: string
+  kimi_model: string
   feishu_webhook_url: string
   feishu_secret: string
   wechat_appid: string
@@ -24,7 +24,7 @@ interface PanelState {
 }
 
 const PASSWORD_FIELDS = new Set([
-  'llm_api_key',
+  'kimi_api_key',
   'feishu_secret',
   'wechat_appsecret',
 ])
@@ -32,9 +32,9 @@ const PASSWORD_FIELDS = new Set([
 const settings = reactive<Settings>({
   obsidian_vault_path: '',
   obsidian_archive_folder: 'AIPulse',
-  llm_api_key: '',
-  llm_base_url: 'https://api.kimi.com/coding/v1',
-  llm_model: 'kimi-for-coding',
+  kimi_api_key: '',
+  kimi_base_url: 'https://api.kimi.com/coding/v1',
+  kimi_model: 'kimi-for-coding',
   feishu_webhook_url: '',
   feishu_secret: '',
   wechat_appid: '',
@@ -51,7 +51,7 @@ const expanded = ref<PanelState>({
 })
 
 const passwordVisible = ref<Record<string, boolean>>({
-  llm_api_key: false,
+  kimi_api_key: false,
   feishu_secret: false,
   wechat_appsecret: false,
 })
@@ -59,6 +59,8 @@ const passwordVisible = ref<Record<string, boolean>>({
 const saving = ref(false)
 const saved = ref(false)
 const errorMessage = ref('')
+const loadError = ref('')
+const vaultPickerMessage = ref('')
 
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -77,12 +79,41 @@ function getInputType(field: keyof Settings) {
   return passwordVisible.value[field] ? 'text' : 'password'
 }
 
+function isMaskedSecret(value: string): boolean {
+  // The backend masks secrets as either `***` (short values) or
+  // `first4***last4` (>= 8 chars). Either form must NOT be sent back —
+  // doing so would overwrite the real secret with the placeholder.
+  return value.includes('***')
+}
+
+let initialSnapshot: Record<string, string> = {}
+
+function applySettings(data: SettingsResponse): void {
+  settings.kimi_api_key = data.kimi?.kimi_api_key ?? ''
+  settings.kimi_base_url = data.kimi?.kimi_base_url ?? settings.kimi_base_url
+  settings.kimi_model = data.kimi?.kimi_model ?? settings.kimi_model
+  settings.obsidian_vault_path = data.obsidian?.obsidian_vault_path ?? ''
+  settings.obsidian_archive_folder =
+    data.obsidian?.obsidian_archive_folder ?? settings.obsidian_archive_folder
+  settings.feishu_webhook_url = data.feishu?.feishu_webhook_url ?? ''
+  settings.feishu_secret = data.feishu?.feishu_secret ?? ''
+  settings.wechat_appid = data.wechat?.wechat_appid ?? ''
+  settings.wechat_appsecret = data.wechat?.wechat_appsecret ?? ''
+  settings.wechat_template_id = data.wechat?.wechat_template_id ?? ''
+  settings.wechat_openid = data.wechat?.wechat_openid ?? ''
+  initialSnapshot = { ...settings }
+}
+
 function buildPayload(): Partial<Settings> {
+  // Only include fields the user has actually touched since the last load.
+  // Masked secrets and empty values are skipped so the backend preserves
+  // the existing secret (CLAUDE.md §4 + spec §10.1).
   const payload: Partial<Settings> = {}
   for (const [key, value] of Object.entries(settings)) {
-    if (typeof value === 'string' && value.includes('***')) {
-      continue
+    if (PASSWORD_FIELDS.has(key)) {
+      if (!value || isMaskedSecret(value)) continue
     }
+    if (value === initialSnapshot[key]) continue
     ;(payload as Record<string, unknown>)[key] = value
   }
   return payload
@@ -99,27 +130,84 @@ async function save() {
 
   try {
     const payload = buildPayload()
-    const updated = await invoke<Partial<Settings>>('update_settings', { settings: payload })
-    if (updated && typeof updated === 'object') {
-      Object.assign(settings, updated)
-    }
+    const updated = await patchSettings(payload)
+    applySettings(updated)
     saved.value = true
     savedTimer = setTimeout(() => {
       saved.value = false
     }, 1500)
-  } catch {
-    errorMessage.value = '保存失败，请重试'
+  } catch (error: unknown) {
+    errorMessage.value = error instanceof Error ? `保存失败：${error.message}` : '保存失败，请重试'
   } finally {
     saving.value = false
   }
 }
 
+function handleSubmit(): void {
+  void save()
+}
+
+interface PickedDirectory {
+  name: string
+  path: string
+}
+
+async function pickObsidianVault(): Promise<void> {
+  vaultPickerMessage.value = ''
+  try {
+    const dir = await pickDirectory()
+    if (!dir) return
+    settings.obsidian_vault_path = dir.path
+    vaultPickerMessage.value = `已选择：${dir.name}`
+  } catch (error: unknown) {
+    vaultPickerMessage.value =
+      error instanceof Error ? `选择失败：${error.message}` : '选择失败，请重试'
+  }
+}
+
+async function pickDirectory(): Promise<PickedDirectory | null> {
+  const picker = (window as unknown as {
+    showDirectoryPicker?: () => Promise<{ kind: string; name: string }>
+  }).showDirectoryPicker
+  if (typeof picker === 'function') {
+    const handle = await picker()
+    return { name: handle.name, path: handle.name }
+  }
+  return pickDirectoryViaInput()
+}
+
+function pickDirectoryViaInput(): Promise<PickedDirectory | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.webkitdirectory = true
+    input.style.display = 'none'
+    input.addEventListener(
+      'change',
+      () => {
+        const files = input.files
+        const first = files && files[0]
+        const dirName = first ? first.webkitRelativePath.split('/')[0] : ''
+        document.body.removeChild(input)
+        if (!dirName) {
+          resolve(null)
+          return
+        }
+        resolve({ name: dirName, path: dirName })
+      },
+      { once: true },
+    )
+    document.body.appendChild(input)
+    input.click()
+  })
+}
+
 onMounted(async () => {
   try {
-    const data = await invoke<Partial<Settings>>('get_settings')
-    Object.assign(settings, data)
+    const data = await getSettings()
+    applySettings(data)
   } catch {
-    errorMessage.value = '加载失败，请重试'
+    loadError.value = '加载失败，请重试'
   }
 })
 
@@ -134,7 +222,12 @@ onUnmounted(() => {
   <div class="settings-container">
     <h2 class="settings-title">设置</h2>
 
-    <div class="scrollable-content">
+    <p v-if="loadError" class="load-error" data-testid="load-error" role="alert">
+      {{ loadError }}
+    </p>
+
+    <form class="settings-form" @submit.prevent="handleSubmit">
+      <div class="scrollable-content">
       <div
         class="panel"
         :class="{ 'is-expanded': expanded.llm }"
@@ -149,28 +242,28 @@ onUnmounted(() => {
           <span class="panel-title">Kimi Code LLM</span>
         </button>
         <div class="panel-body">
-          <label for="llm-api-key">API Key</label>
+          <label for="kimi-api-key">API Key</label>
           <div class="password-field">
             <input
-              id="llm-api-key"
-              v-model="settings.llm_api_key"
-              :type="getInputType('llm_api_key')"
+              id="kimi-api-key"
+              v-model="settings.kimi_api_key"
+              :type="getInputType('kimi_api_key')"
             />
             <button
               type="button"
               class="toggle-password"
-              data-testid="toggle-llm-api-key"
-              @click="togglePassword('llm_api_key')"
+              data-testid="toggle-kimi-api-key"
+              @click="togglePassword('kimi_api_key')"
             >
-              {{ passwordVisible.llm_api_key ? '隐藏' : '显示' }}
+              {{ passwordVisible.kimi_api_key ? '隐藏' : '显示' }}
             </button>
           </div>
 
-          <label for="llm-base-url">Base URL</label>
-          <input id="llm-base-url" v-model="settings.llm_base_url" type="text" />
+          <label for="kimi-base-url">Base URL</label>
+          <input id="kimi-base-url" v-model="settings.kimi_base_url" type="text" />
 
-          <label for="llm-model">Model</label>
-          <input id="llm-model" v-model="settings.llm_model" type="text" />
+          <label for="kimi-model">Model</label>
+          <input id="kimi-model" v-model="settings.kimi_model" type="text" />
         </div>
       </div>
 
@@ -189,7 +282,25 @@ onUnmounted(() => {
         </button>
         <div class="panel-body">
           <label for="obsidian-vault-path">Vault 路径</label>
-          <input id="obsidian-vault-path" v-model="settings.obsidian_vault_path" type="text" />
+          <div class="vault-path-row">
+            <input id="obsidian-vault-path" v-model="settings.obsidian_vault_path" type="text" />
+            <button
+              type="button"
+              class="vault-picker-btn"
+              data-testid="pick-obsidian-vault"
+              @click="pickObsidianVault"
+            >
+              选择目录
+            </button>
+          </div>
+          <p
+            v-if="vaultPickerMessage"
+            class="vault-picker-status"
+            data-testid="vault-picker-status"
+            role="status"
+          >
+            {{ vaultPickerMessage }}
+          </p>
 
           <label for="obsidian-archive-folder">归档文件夹</label>
           <input
@@ -279,19 +390,20 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="actions">
-      <button
-        class="save-button"
-        data-testid="save-button"
-        :disabled="saving"
-        @click="save"
-      >
-        {{ saving ? '保存中...' : saved ? '已保存' : '保存' }}
-      </button>
-      <p v-if="errorMessage" class="error-message" data-testid="save-error">
-        {{ errorMessage }}
-      </p>
-    </div>
+      <div class="actions">
+        <button
+          type="submit"
+          class="save-button"
+          data-testid="save-button"
+          :disabled="saving"
+        >
+          {{ saving ? '保存中...' : saved ? '已保存' : '保存' }}
+        </button>
+        <p v-if="errorMessage" class="error-message" data-testid="save-error">
+          {{ errorMessage }}
+        </p>
+      </div>
+    </form>
   </div>
 </template>
 
@@ -303,12 +415,26 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.settings-form {
+  display: contents;
+}
+
 .settings-title {
   margin: 0;
   padding: 20px 20px 12px;
   font-size: var(--text-xl);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.load-error {
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--status-red) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--status-red) 30%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--status-red);
+  font-size: 13px;
 }
 
 .scrollable-content {

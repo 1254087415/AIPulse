@@ -1,28 +1,33 @@
 /**
- * Router — central navigation table for the AIPulse Tauri webview.
+ * Router — central navigation table for the AIPulse webview.
  *
  * Layout (spec §6.14):
  *   /                       → redirect to /dashboard
  *   /dashboard              → DashboardView (default tab=hotspot)
  *   /dashboard/followed     → standalone followed view (deep link)
- *   /followed-up/:uid       → FollowDetailView (Phase 2)
- *   /hotspot/:id            → HotspotDetailView (existing)
- *   /keywords               → KeywordsView (existing)
- *   /sources                → SourcesView (existing)
- *   /jobs                   → JobsView (existing)
- *   /digests                → DigestsView (existing)
- *   /settings               → SettingsView (existing)
+ *   /followed-up/:uid       → FollowDetailView
+ *   /hotspot/:id            → HotspotDetailView
+ *   /keywords               → KeywordsView
+ *   /sources                → SourcesView
+ *   /jobs                   → JobsView
+ *   /digests                → DigestsView
+ *   /settings               → SettingsView
  *
- * Hash history is used because the Tauri webview ships as a single HTML
- * document; HTML5 history mode requires a server-side fallback that we don't
- * have inside the bundle.
+ * HTML5 history mode is used (spec §8.1). In the Tauri webview the embedded
+ * static server returns the SPA shell for any unmatched route; in `vite dev`
+ * the dev server already does SPA fallback for any non-asset request.
  */
 
-import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import DashboardView from '../views/DashboardView.vue'
 import InputView from '../views/InputView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import TasksView from '../views/TasksView.vue'
+import SourcesView from '../views/SourcesView.vue'
+import KeywordsView from '../views/KeywordsView.vue'
+import JobsView from '../views/JobsView.vue'
+import DigestsView from '../views/DigestsView.vue'
+import HotspotDetailView from '../views/HotspotDetailView.vue'
 
 export const ROUTES: RouteRecordRaw[] = [
   { path: '/', redirect: '/dashboard' },
@@ -38,11 +43,11 @@ export const ROUTES: RouteRecordRaw[] = [
     component: () => import('../views/FollowDetailView.vue'),
     props: true,
   },
-  { path: '/hotspot/:id', name: 'hotspot-detail', component: TasksView, props: true },
-  { path: '/keywords', name: 'keywords', component: SettingsView },
-  { path: '/sources', name: 'sources', component: SettingsView },
-  { path: '/jobs', name: 'jobs', component: TasksView },
-  { path: '/digests', name: 'digests', component: SettingsView },
+  { path: '/hotspot/:id', name: 'hotspot-detail', component: HotspotDetailView, props: true },
+  { path: '/keywords', name: 'keywords', component: KeywordsView },
+  { path: '/sources', name: 'sources', component: SourcesView },
+  { path: '/jobs', name: 'jobs', component: JobsView },
+  { path: '/digests', name: 'digests', component: DigestsView },
   { path: '/settings', name: 'settings', component: SettingsView },
   // Legacy Tauri-only windows — kept so existing IPC invocations still land
   // on a rendered page.
@@ -51,7 +56,7 @@ export const ROUTES: RouteRecordRaw[] = [
 ]
 
 export const router = createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes: ROUTES,
   scrollBehavior() {
     return { top: 0 }

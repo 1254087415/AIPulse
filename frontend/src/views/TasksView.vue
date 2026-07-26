@@ -1,4 +1,15 @@
 <script setup lang="ts">
+/**
+ * TasksView — legacy Tauri-only window.
+ *
+ * Renders the in-app task list from the Rust backend via `invoke('list_tasks')`
+ * and listens to `task_progress` events through `@tauri-apps/api/event`. Both
+ * entry points require the Tauri runtime — when the page is opened in a
+ * plain browser (vite dev, sidecar-only mode) the module's `transformCallback`
+ * shim throws `Cannot read properties of undefined`. Phase 8 R2#3 adds a
+ * `window.__TAURI_INTERNALS__` probe that puts the view into a quiet
+ * fallback state instead, with a link back to the v0.3 dashboard.
+ */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
@@ -24,6 +35,10 @@ const EMPTY_HINT = '去输入页粘贴一个链接开始'
 const GOTO_INPUT_LABEL = '前往输入页'
 const LOAD_ERROR_PREFIX = '加载任务失败'
 const RETRY_ERROR_PREFIX = '重试失败'
+const BROWSER_FALLBACK_TITLE = '此页面仅在桌面端 AIPulse 内可用'
+const BROWSER_FALLBACK_DESCRIPTION =
+  '“最近任务” 由 Tauri 后端直接驱动（list_tasks / task_progress 事件）。当前在浏览器中打开了 /tasks，因此不会有数据。请回到 dashboard 浏览 v0.3 视图。'
+const BROWSER_FALLBACK_ACTION = '回 dashboard'
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'PENDING',
@@ -42,6 +57,14 @@ const tasks = ref<Task[]>([])
 const loadError = ref('')
 const retryError = ref('')
 const retryingIds = ref<Set<string>>(new Set())
+
+// Phase 8 R2#3: when the view renders under vite dev the Tauri runtime is
+// absent; expose a flag so the template can swap to a friendly fallback
+// instead of letting `invoke()`/`listen()` throw inside their first call.
+const isTauriEnvironment = ref<boolean>(
+  typeof window !== 'undefined' &&
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__),
+)
 
 let isActive = true
 let unlistenProgress: UnlistenFn | null = null
@@ -128,6 +151,12 @@ function upsertTask(payload: TaskProgressPayload) {
 }
 
 onMounted(async () => {
+  // Phase 8 R2#3: never touch Tauri IPC outside the desktop runtime. The
+  // `invoke()` and `listen()` wrappers crash in plain browsers because their
+  // `transformCallback` shim is undefined, and we don't want this page to
+  // take the whole dashboard down if a user opens `/tasks` from a stale tab.
+  if (!isTauriEnvironment.value) return
+
   await loadTasks()
   unlistenProgress = await listen<TaskProgressPayload>('task_progress', (event) => {
     upsertTask(event.payload)
@@ -147,10 +176,28 @@ onUnmounted(() => {
 
 <template>
   <div class="tasks-view">
-    <header class="tasks-header">
-      <h2 class="title">{{ PAGE_TITLE }}</h2>
-      <span class="count">{{ tasks.length }} 条</span>
-    </header>
+    <section
+      v-if="!isTauriEnvironment"
+      class="tasks-browser-fallback"
+      data-testid="tasks-browser-fallback"
+      role="status"
+    >
+      <h2 class="title">{{ BROWSER_FALLBACK_TITLE }}</h2>
+      <p class="hint">{{ BROWSER_FALLBACK_DESCRIPTION }}</p>
+      <router-link
+        to="/dashboard"
+        class="back-link"
+        data-testid="tasks-back-to-dashboard"
+      >
+        {{ BROWSER_FALLBACK_ACTION }}
+      </router-link>
+    </section>
+
+    <template v-else>
+      <header class="tasks-header">
+        <h2 class="title">{{ PAGE_TITLE }}</h2>
+        <span class="count">{{ tasks.length }} 条</span>
+      </header>
 
     <div v-if="loadError || retryError" class="error-banner" role="alert">
       {{ loadError || retryError }}
@@ -219,6 +266,7 @@ onUnmounted(() => {
         <p class="task-source">{{ formatSource(task.url) }}</p>
       </li>
     </ul>
+    </template>
   </div>
 </template>
 
@@ -229,6 +277,44 @@ onUnmounted(() => {
   height: 100%;
   padding: 16px;
   overflow: hidden;
+}
+
+.tasks-browser-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.tasks-browser-fallback .hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 480px;
+  line-height: 1.6;
+}
+
+.tasks-browser-fallback .back-link {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-coral);
+  color: var(--surface-elevated);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.tasks-browser-fallback .back-link:hover {
+  background: color-mix(in srgb, var(--accent-coral) 88%, black 12%);
 }
 
 .tasks-header {

@@ -1,18 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import Sidebar from '../../src/components/sidebar/Sidebar.vue'
 import SidebarNav from '../../src/components/sidebar/SidebarNav.vue'
 
 const createTestRouter = () =>
   createRouter({
-    history: createWebHashHistory(),
+    history: createWebHistory(),
     routes: [
       { path: '/', redirect: '/dashboard' },
       { path: '/dashboard', component: { template: '<div>Dashboard</div>' } },
-      { path: '/followed', component: { template: '<div>Followed</div>' } },
-      { path: '/upcoming', component: { template: '<div>Upcoming</div>' } },
-      { path: '/failed', component: { template: '<div>Failed</div>' } },
+      { path: '/sources', component: { template: '<div>Sources</div>' } },
+      { path: '/keywords', component: { template: '<div>Keywords</div>' } },
+      { path: '/jobs', component: { template: '<div>Jobs</div>' } },
+      { path: '/digests', component: { template: '<div>Digests</div>' } },
+      { path: '/settings', component: { template: '<div>Settings</div>' } },
     ],
   })
 
@@ -45,31 +47,64 @@ describe('Sidebar', () => {
     wrapper.unmount()
   })
 
-  it('renders the four expected navigation items: 首页 / 关注 / 即将学习 / 失败', async () => {
+  it('renders the six expected navigation items per spec §6.9', async () => {
     const wrapper = mount(Sidebar, {
       global: { plugins: [router] },
     })
     await flushPromises()
 
     const items = wrapper.findAll('.app-sidebar__item')
-    expect(items).toHaveLength(4)
-    expect(items[0].text()).toContain('首页')
-    expect(items[1].text()).toContain('关注')
-    expect(items[2].text()).toContain('即将学习')
-    expect(items[3].text()).toContain('失败')
+    expect(items).toHaveLength(6)
+    expect(items[0].text()).toContain('AI 热点')
+    expect(items[1].text()).toContain('来源')
+    expect(items[2].text()).toContain('关键词')
+    expect(items[3].text()).toContain('定时任务')
+    expect(items[4].text()).toContain('摘要')
+    expect(items[5].text()).toContain('系统')
+    // The follow-up tabs live inside DashboardView, not here.
+    const combined = items.map((i) => i.text()).join(' | ')
+    expect(combined).not.toContain('关注列表')
+    expect(combined).not.toContain('即将学习')
 
     wrapper.unmount()
   })
 
-  it('marks the active item based on the current route', async () => {
+  it('marks the AI 热点 entry as active when on /dashboard', async () => {
     const wrapper = mount(Sidebar, {
       global: { plugins: [router] },
     })
-    await pushAndWait(router, '/followed')
+    await pushAndWait(router, '/dashboard')
 
     const items = wrapper.findAll('.app-sidebar__item')
-    expect(items[0].classes()).not.toContain('app-sidebar__item--active')
-    expect(items[1].classes()).toContain('app-sidebar__item--active')
+    expect(items[0].classes()).toContain('app-sidebar__item--active')
+    expect(items[0].text()).toContain('AI 热点')
+
+    wrapper.unmount()
+  })
+
+  it('marks each non-dashboard entry as active when on its route', async () => {
+    const wrapper = mount(Sidebar, {
+      global: { plugins: [router] },
+    })
+
+    const cases: Array<[string, number]> = [
+      ['/sources', 1],
+      ['/keywords', 2],
+      ['/jobs', 3],
+      ['/digests', 4],
+      ['/settings', 5],
+    ]
+    for (const [path, index] of cases) {
+      await pushAndWait(router, path)
+      const items = wrapper.findAll('.app-sidebar__item')
+      items.forEach((item, i) => {
+        if (i === index) {
+          expect(item.classes()).toContain('app-sidebar__item--active')
+        } else {
+          expect(item.classes()).not.toContain('app-sidebar__item--active')
+        }
+      })
+    }
 
     wrapper.unmount()
   })
@@ -79,14 +114,15 @@ describe('Sidebar', () => {
       global: { plugins: [router] },
     })
 
-    await pushAndWait(router, '/upcoming')
-    const items = wrapper.findAll('.app-sidebar__item')
-    expect(items[2].classes()).toContain('app-sidebar__item--active')
+    await pushAndWait(router, '/sources')
+    expect(wrapper.findAll('.app-sidebar__item')[1].classes()).toContain(
+      'app-sidebar__item--active',
+    )
 
-    await pushAndWait(router, '/failed')
+    await pushAndWait(router, '/settings')
     const updated = wrapper.findAll('.app-sidebar__item')
-    expect(updated[2].classes()).not.toContain('app-sidebar__item--active')
-    expect(updated[3].classes()).toContain('app-sidebar__item--active')
+    expect(updated[1].classes()).not.toContain('app-sidebar__item--active')
+    expect(updated[5].classes()).toContain('app-sidebar__item--active')
 
     wrapper.unmount()
   })
@@ -111,11 +147,11 @@ describe('Sidebar', () => {
     })
     await flushPromises()
 
-    const followedLink = wrapper.findAll('.app-sidebar__item')[1]
-    await followedLink.trigger('click')
+    const sourcesLink = wrapper.findAll('.app-sidebar__item')[1]
+    await sourcesLink.trigger('click')
     await flushPromises()
 
-    expect(router.currentRoute.value.path).toBe('/followed')
+    expect(router.currentRoute.value.path).toBe('/sources')
 
     wrapper.unmount()
   })
