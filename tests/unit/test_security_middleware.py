@@ -6,7 +6,7 @@ import pytest
 from pydantic import SecretStr
 from starlette.requests import Request
 
-from aipulse.core.config import get_settings
+from aipulse.core.config import AppSettings, get_settings
 from aipulse.web.security_middleware import verify_auth_header
 
 
@@ -104,10 +104,15 @@ def test_settings_kimi_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KIMI_API_KEY", raising=False)
     monkeypatch.delenv("KIMI_BASE_URL", raising=False)
     monkeypatch.delenv("KIMI_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("LEARNING_NOTIFICATION_ENABLED", raising=False)
     get_settings.cache_clear()
 
-    settings = get_settings()
+    # Construct with _env_file=None to bypass .env defaults so we observe
+    # the model's true defaults.
+    settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
     # Defaults aligned with v0.3 spec §5.3 (kimi-for-coding + Kimi coding endpoint).
     assert settings.kimi_base_url == "https://api.kimi.com/coding/v1"
     assert settings.kimi_model == "kimi-for-coding"

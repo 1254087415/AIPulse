@@ -135,8 +135,14 @@ class TestLifespan:
                 async with lifespan(app):
                     pass
 
-        # scheduler.add_job 被调用三次
-        assert fake_scheduler.add_job.call_count == 3
+        # scheduler.add_job 被调用四次：
+        # hotspot_sync + digest_generate + vault_scan + register_followed_up_jobs
+        assert fake_scheduler.add_job.call_count == 4
+        # register_followed_up_jobs 注册的 job id 必须存在
+        job_ids = {
+            call.kwargs.get("id") for call in fake_scheduler.add_job.call_args_list
+        }
+        assert "followed_up_scan_all" in job_ids
         # scheduler.start / shutdown
         fake_scheduler.start.assert_called_once()
         fake_scheduler.shutdown.assert_called_once_with(wait=False)
@@ -171,8 +177,12 @@ class TestLifespan:
 
         mock_init.assert_not_awaited()
         mock_seed.assert_not_awaited()
-        # scheduler & queue 仍初始化
-        assert fake_scheduler.add_job.call_count == 3
+        # scheduler & queue 仍初始化 — register_followed_up_jobs 也会 add_job
+        assert fake_scheduler.add_job.call_count == 4
+        job_ids = {
+            call.kwargs.get("id") for call in fake_scheduler.add_job.call_args_list
+        }
+        assert "followed_up_scan_all" in job_ids
         fake_scheduler.start.assert_called_once()
         fake_queue.start.assert_awaited_once()
 

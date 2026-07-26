@@ -16,7 +16,12 @@ from collections.abc import AsyncGenerator
 import pytest
 import pytest_asyncio
 
-from aipulse.apple.reminders import _escape_for_applescript, _format_due_date, create_reminder
+from aipulse.apple.reminders import (
+    _escape_for_applescript,
+    _format_due_date,
+    create_reminder,
+    pick_list_for_topic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +112,39 @@ async def test_create_reminder_short_title(monkeypatch) -> None:
     except RuntimeError:
         # ok — sandboxed envs may not have Reminders access
         pass
+
+
+# ---------------------------------------------------------------------------
+# pick_list_for_topic (spec 06 §7.2)
+# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_pick_list_for_topic_work_study() -> None:
+    """关键字匹配 → 工作学习 列表。"""
+    assert pick_list_for_topic("LangChain ReAct 学习") == "工作学习"
+    assert pick_list_for_topic("AI 工具实战") == "工作学习"
+    assert pick_list_for_topic("编程之道") == "工作学习"
+    assert pick_list_for_topic("面试经验分享") == "工作学习"
+    assert pick_list_for_topic("前沿技术解读") == "工作学习"
+
+
+@pytest.mark.unit
+def test_pick_list_for_topic_money() -> None:
+    """关键字匹配 → 搞钱！！！ 列表。"""
+    assert pick_list_for_topic("搞钱思维") == "搞钱！！！"
+    assert pick_list_for_topic("副业启动") == "搞钱！！！"
+    assert pick_list_for_topic("创业日记") == "搞钱！！！"
+    assert pick_list_for_topic("变现案例分析") == "搞钱！！！"
+
+
+@pytest.mark.unit
+def test_pick_list_for_topic_misc() -> None:
+    """业务关键字都不命中 → 琐碎生活 列表。"""
+    assert pick_list_for_topic("周末去哪儿玩") == "琐碎生活"
+    assert pick_list_for_topic("好吃的餐厅推荐") == "琐碎生活"
+
+
+@pytest.mark.unit
+def test_pick_list_for_topic_empty_defaults_to_misc() -> None:
+    """空 / None / 不传 topic → 琐碎生活。"""
+    assert pick_list_for_topic("") == "琐碎生活"
+    assert pick_list_for_topic(None) == "琐碎生活"  # type: ignore[arg-type]

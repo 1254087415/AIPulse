@@ -24,13 +24,13 @@ class OpenAICompatibleAdapter:
         client: AsyncOpenAI | None = None,
     ) -> None:
         self.settings = settings or AppSettings()
-        self.base_url = base_url or self.settings.llm_base_url or DEFAULT_BASE_URL
-        self.model = model or self.settings.llm_model or DEFAULT_MODEL
+        self.base_url = base_url or self.settings.kimi_base_url
+        self.model = model or self.settings.kimi_model
         if client is not None:
             self.client = client
         else:
             api_key = (
-                self.settings.llm_api_key.get_secret_value() if self.settings.llm_api_key else None
+                self.settings.kimi_api_key.get_secret_value() if self.settings.kimi_api_key else None
             )
             self.client = AsyncOpenAI(
                 base_url=self.base_url,

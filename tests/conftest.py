@@ -17,6 +17,7 @@ from aipulse.models import (  # noqa: F401  registers new follow + learning tabl
 from aipulse.server import app
 from aipulse.store.database import (
     configure_test_database,
+    get_engine,
     get_session_maker,
     reset_db,
 )
@@ -30,8 +31,11 @@ os.environ.setdefault("AUTO_CREATE_TABLES", "true")
 # Override settings that may be loaded from the local .env file so that tests
 # observe the same values as the code defaults regardless of the developer's
 # environment configuration.
-os.environ["LLM_BASE_URL"] = "https://api.kimi.com/coding/v1"
-os.environ["LLM_MODEL"] = "kimi-for-coding"
+os.environ["KIMI_BASE_URL"] = "https://api.kimi.com/coding/v1"
+os.environ["KIMI_MODEL"] = "kimi-for-coding"
+# Strip any real keys the developer might have in their .env so tests always
+# start from a known placeholder state.
+os.environ.pop("KIMI_API_KEY", None)
 os.environ.pop("LLM_API_KEY", None)
 # Provide placeholder secrets so build_agent_executor() can construct the
 # ChatOpenAI client without the underlying OpenAI SDK complaining about a
@@ -39,14 +43,46 @@ os.environ.pop("LLM_API_KEY", None)
 # if neither is set). Placeholders are ignored by tests via test isolation
 # fixtures; production code paths run only when the real key has been provided
 # through PATCH /api/settings.
-os.environ.setdefault("KIMI_API_KEY", "sk-test-placeholder-kimi")
+os.environ["KIMI_API_KEY"] = "sk-test-placeholder-kimi"
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-placeholder-openai")
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def _use_test_database() -> None:
-    """Route all database access to an in-memory SQLite instance."""
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_db_and_settings(
+    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[None, None]:
+    """Per-test: redirect data_dir + refresh DB engine + reset schema.
+
+    Why per-test instead of session-scope: ``configure_test_database`` caches
+    the engine URL inside ``_engine_override`` and ``isolate_data_dir`` clears
+    ``get_settings`` between tests. A session-scope wiring pins the engine
+    to the URL captured at session start — so once ``DATABASE_URL`` flips to
+    ``:memory:`` after that capture, subsequent ``reset_db()`` / DB-backed
+    fixtures still hit the *real* ``data/aipulse.db``. Recreating the
+    override each test guarantees the engine always matches the current
+    settings and ``data_dir`` always points to a tmp location so the
+    developer's real ``data/settings.json`` is never read or written.
+
+    Also ``reset_db()`` so every test sees a fresh, fully-migrated schema
+    regardless of which other tests ran earlier — the old session-scope
+    setup leaked tables across tests because the in-memory SQLite instance
+    was reused; per-test isolation is the canonical pytest pattern and is
+    what these tests actually require.
+    """
+    test_dir = tmp_path / "data"
+    monkeypatch.setenv("DATA_DIR", str(test_dir))
+    monkeypatch.setenv("DOWNLOAD_DIR", str(test_dir / "downloads"))
+    get_settings.cache_clear()
+    # Rebuild the DB engine so any cached get_engine() / get_session_maker()
+    # lookups see the in-memory URL captured from the freshly cleared settings.
     await configure_test_database(get_settings())
+    get_engine.cache_clear()
+    get_session_maker.cache_clear()
+    # Drop + recreate every table so any test that calls get_session_maker()
+    # directly (without using ``client`` / ``db_session``) still sees the
+    # expected schema.
+    await reset_db()
+    yield
 
 
 @pytest_asyncio.fixture
@@ -63,17 +99,3 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     await reset_db()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
         yield http_client
-
-
-@pytest.fixture(autouse=True)
-def isolate_data_dir(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Route AppSettings.data_dir to a fresh tmp directory per test.
-
-    Without this, tests that touch AppSettings would read the developer's
-    real ``data/settings.json`` (and write to it), causing state to leak
-    across tests and silently overriding monkeypatched env vars.
-    """
-    test_dir = tmp_path / "data"
-    monkeypatch.setenv("DATA_DIR", str(test_dir))
-    monkeypatch.setenv("DOWNLOAD_DIR", str(test_dir / "downloads"))
-    get_settings.cache_clear()

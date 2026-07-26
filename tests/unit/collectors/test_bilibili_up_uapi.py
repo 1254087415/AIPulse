@@ -1,6 +1,13 @@
 """Unit tests for BilibiliUpUapiCollector.
 
 Mock httpx to simulate UAPI responses.
+
+注意（2026-07 换端点）：
+- ``/api/v1/space/arc/search`` → 404 NOT_FOUND
+- ``/api/v1/space/card`` → 404 NOT_FOUND
+- 新端点 ``/api/v1/social/bilibili/archives`` 单接口承担"拉视频"+"校验存在"
+- 响应无外层 code 包裹：``{total, page, size, videos[{bvid, title,
+  cover, duration, play_count, publish_time, ...}]}``
 """
 
 from __future__ import annotations
@@ -11,10 +18,11 @@ import httpx
 import pytest
 import respx
 
-from aipulse.collectors.bilibili_up.uapi import BilibiliUpUapiCollector
-
-
-UAPI_BASE = "https://uapis.cn/api/v1"
+from aipulse.collectors.bilibili_up.uapi import (
+    ARCHIVES_PATH,
+    UAPI_BASE,
+    BilibiliUpUapiCollector,
+)
 
 
 @pytest.fixture
@@ -26,36 +34,36 @@ def collector():
     asyncio.run(c.close())
 
 
+def _sample_videos() -> list[dict[str, Any]]:
+    return [
+        {
+            "bvid": "BV1abc",
+            "title": "视频1",
+            "publish_time": 1721000000,
+            "duration": 600,
+            "play_count": 1234,
+            "cover": "http://example.com/1.jpg",
+        },
+        {
+            "bvid": "BV2def",
+            "title": "视频2",
+            "publish_time": 1720900000,
+            "duration": 300,
+            "play_count": 100,
+        },
+    ]
+
+
 class TestFetchVideos:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_fetch_videos_returns_parsed_videos(self, collector: BilibiliUpUapiCollector):
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
                     200,
-                    json={
-                        "code": 0,
-                        "data": {
-                            "list": [
-                                {
-                                    "bvid": "BV1abc",
-                                    "title": "视频1",
-                                    "pubdate": 1721000000,
-                                    "duration": 600,
-                                    "play": 1234,
-                                },
-                                {
-                                    "bvid": "BV2def",
-                                    "title": "视频2",
-                                    "pubdate": 1720900000,
-                                    "duration": 300,
-                                },
-                            ],
-                            "has_more": False,
-                        },
-                    },
+                    json={"total": 2, "page": 1, "size": 50, "videos": _sample_videos()},
                 )
             )
 
@@ -70,15 +78,15 @@ class TestFetchVideos:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_fetch_videos_returns_empty_on_rate_limit(
+    async def test_fetch_videos_returns_empty_on_http_error(
         self, collector: BilibiliUpUapiCollector
     ):
-        """UAPI 遇到 code != 0 → 返回空 list，不抛异常。"""
+        """archives 端点 HTTP 4xx/5xx → 返回空 list，不抛异常。"""
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
-                    200,
-                    json={"code": 429, "message": "rate limited"},
+                    500,
+                    json={"code": "INTERNAL_ERROR", "message": "upstream down"},
                 )
             )
 
@@ -91,11 +99,9 @@ class TestFetchVideos:
     async def test_fetch_videos_returns_empty_on_network_error(
         self, collector: BilibiliUpUapiCollector
     ):
-        """UAPI 网络异常 → 返回空 list。"""
+        """archives 端点网络异常 → 返回空 list。"""
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
-                side_effect=httpx.ConnectError("boom")
-            )
+            mock.get(ARCHIVES_PATH).mock(side_effect=httpx.ConnectError("boom"))
 
             videos = await collector.fetch_videos("mid", count=10)
 
@@ -106,28 +112,43 @@ class TestFetchVideos:
     async def test_fetch_videos_incremental_cursor_stops(self, collector: BilibiliUpUapiCollector):
         """命中 last_cursor_id 后停止翻页。"""
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
                     200,
                     json={
-                        "code": 0,
-                        "data": {
-                            "list": [
-                                {"bvid": "BV3new", "title": "new", "pubdate": 1721100000},
-                                {"bvid": "BV1old", "title": "old", "pubdate": 1721000000},
-                            ],
-                            "has_more": False,
-                        },
+                        "total": 2,
+                        "page": 1,
+                        "size": 50,
+                        "videos": [
+                            {"bvid": "BV3new", "title": "new", "publish_time": 1721100000},
+                            {"bvid": "BV1old", "title": "old", "publish_time": 1721000000},
+                        ],
                     },
                 )
             )
 
             videos = await collector.fetch_videos("mid", count=10, last_cursor_id="BV1old")
 
-        # BV1old 是 cursor，应跳过；BV3new 在前 → 已加入
-        # 实际上顺序：先遍历 BV3new（不等），加入；再遍历 BV1old（==cursor），停止
         assert all(v.bvid != "BV1old" for v in videos)
         assert any(v.bvid == "BV3new" for v in videos)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_fetch_videos_pagination_stops_at_total(self, collector: BilibiliUpUapiCollector):
+        """total=2 + size=50 → 单页拿完不再翻 page=2。"""
+        with respx.mock(base_url=UAPI_BASE) as mock:
+            route = mock.get(ARCHIVES_PATH).mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"total": 2, "page": 1, "size": 50, "videos": _sample_videos()},
+                )
+            )
+
+            videos = await collector.fetch_videos("1567748478", count=10)
+
+        assert len(videos) == 2
+        # 只请求了一次
+        assert route.call_count == 1
 
 
 class TestValidate:
@@ -135,62 +156,58 @@ class TestValidate:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_validate_existing_up(self, collector: BilibiliUpUapiCollector):
+        """UP主 存在（total>0）→ exists=True。"""
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/card").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
                     200,
-                    json={
-                        "code": 0,
-                        "data": {"user": {"name": "跟李沐学AI", "mid": "1567748478"}},
-                    },
+                    json={"total": 188, "page": 1, "size": 1, "videos": [
+                        {"bvid": "BV1", "title": "第一条视频", "publish_time": 1721000000},
+                    ]},
                 )
             )
 
             exists, name = await collector.validate_up_exists("1567748478")
 
         assert exists is True
-        assert name == "跟李沐学AI"
+        assert name == "第一条视频"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_validate_nonexistent_up_returns_false(self, collector: BilibiliUpUapiCollector):
+        """total=0 + videos=[] → exists=False (UP主 不存在或无投稿)。"""
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/card").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
                     200,
-                    json={"code": -404, "message": "用户不存在"},
+                    json={"total": 0, "page": 1, "size": 1, "videos": []},
                 )
             )
 
             exists, name = await collector.validate_up_exists("99999")
 
         assert exists is False
-        assert "用户不存在" in name or "不存在" in name
+        assert "不存在" in name or "暂无" in name
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_validate_disabled_account_returns_false(
+    async def test_validate_returns_false_on_network_error(
         self, collector: BilibiliUpUapiCollector
     ):
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/card").mock(
-                return_value=httpx.Response(
-                    200,
-                    json={"code": 0, "data": {"user": {"name": ""}}},
-                )
-            )
+            mock.get(ARCHIVES_PATH).mock(side_effect=httpx.ConnectError("boom"))
 
             exists, name = await collector.validate_up_exists("mid")
 
         assert exists is False
-        assert "注销" in name
+        assert "校验失败" in name
 
 
 class TestParseVideo:
 
     @pytest.mark.unit
     def test_parse_video_handles_missing_fields(self):
-        # 缺 pubdate → 降级到 datetime.now()
+        # 缺 publish_time → 降级到 datetime.now()
         v = BilibiliUpUapiCollector._parse_video({"bvid": "BVx", "title": "t"})
         assert v is not None
         assert v.bvid == "BVx"
@@ -199,3 +216,12 @@ class TestParseVideo:
     def test_parse_video_returns_none_on_garbage(self):
         v = BilibiliUpUapiCollector._parse_video({})
         assert v is None
+
+    @pytest.mark.unit
+    def test_parse_video_uses_publish_time_field(self):
+        """新端点字段是 publish_time（不是 pubdate）。"""
+        v = BilibiliUpUapiCollector._parse_video({
+            "bvid": "BVx", "title": "t", "publish_time": 1721000000,
+        })
+        assert v is not None
+        assert v.pubdate.timestamp() == 1721000000

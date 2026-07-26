@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class KimiSettings(BaseModel):
@@ -100,3 +101,19 @@ class SettingsUpdate(BaseModel):
     # Feishu
     feishu_webhook_url: str | None = None
     feishu_secret: str | None = None
+
+    @field_validator("obsidian_vault_path")
+    @classmethod
+    def _vault_path_must_exist(cls, value: str | None) -> str | None:
+        """Spec E4: non-empty vault paths must point to an existing directory.
+
+        Empty / None passes (caller is not changing the vault); a non-empty
+        path that does not resolve on disk is rejected at the schema layer,
+        which FastAPI surfaces as a 422 envelope — the conventional
+        "the payload itself is bad" status.
+        """
+        if not value:
+            return value
+        if not Path(value).expanduser().exists():
+            raise ValueError(f"obsidian vault path does not exist: {value}")
+        return value

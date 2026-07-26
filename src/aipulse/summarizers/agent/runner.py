@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Any
 
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.prompts import PromptTemplate
 
 from aipulse.summarizers.agent.prompts import SYSTEM_PROMPT_TEMPLATE
@@ -54,14 +55,11 @@ def _build_chat_model():
     from langchain_openai import ChatOpenAI
 
     settings = get_settings()
-    api_key = (
-        settings.kimi_api_key.get_secret_value()
-        or settings.llm_api_key.get_secret_value()
-    )
+    api_key = settings.kimi_api_key.get_secret_value()
     if not api_key:
         api_key = "sk-placeholder-for-build"
-    base_url = settings.kimi_base_url or settings.llm_base_url
-    model = settings.kimi_model or settings.llm_model
+    base_url = settings.kimi_base_url
+    model = settings.kimi_model
 
     return ChatOpenAI(
         base_url=base_url,
@@ -109,9 +107,20 @@ async def run_summary_pipeline(
         f"请对视频 {video_id}（标题：{title}，UP主：{up_name}）执行完整总结 pipeline。"
         f"使用默认 scheduled_at（{default_scheduled_at()}）。{extra_context}"
     )
+    # L7 (2026-07-26): 用 LangChain callback 实时捕获每个 tool call 到外层
+    # mutable list —— 即便 asyncio.wait_for 触发 TimeoutError、LangChain 内部
+    # intermediate_steps 被 cancel 清掉，callback 已记录过的步骤不会丢失。
+    # error 字段文案必须和 intermediate_steps 实际内容一致（feedback
+    # status-must-not-mask-failure 硬约束）。
+    captured_steps: list[dict[str, Any]] = []
+    step_capture = _StepCaptureCallback(captured_steps)
+
     try:
         result = await asyncio.wait_for(
-            executor.ainvoke({"input": user_input, "chat_history": []}),
+            executor.ainvoke(
+                {"input": user_input, "chat_history": []},
+                config={"callbacks": [step_capture]},
+            ),
             timeout=300.0,
         )
         return {
@@ -119,6 +128,7 @@ async def run_summary_pipeline(
             "note_path": _extract_step(result, "create_obsidian_note", "note_path"),
             "event_id": _extract_step(result, "create_learning_event", "event_id"),
             "reminder_id": _extract_step(result, "send_notification", "reminder_id"),
+            "hotspot_id": _extract_step(result, "create_learning_event", "hotspot_id"),
             "error": None,
             "intermediate_steps": [
                 {"tool": step[0].tool, "output": step[1]}
@@ -126,15 +136,33 @@ async def run_summary_pipeline(
             ],
         }
     except asyncio.TimeoutError:
-        logger.error("Agent pipeline timeout for %s", video_id)
+        # L7: error 文案如实反映 captured_steps 状态。若 captured_steps 为空
+        # 说明 LangChain 在 cancel 之前还没触发任何 on_tool_end（如 LLM 调用
+        # 阶段就超时）→ 文案必须说"未记录"。
+        logger.error(
+            "Agent pipeline timeout for %s after 300s (captured_steps=%d)",
+            video_id,
+            len(captured_steps),
+        )
+        if captured_steps:
+            err_msg = (
+                f"5 分钟超时，已记录 {len(captured_steps)} 个 intermediate_steps"
+            )
+        else:
+            err_msg = "5 分钟超时，未记录 intermediate_steps（cancel 前 callback 未触发）"
         return {
             "status": "partial",
-            "error": "5 分钟超时，已记录 intermediate_steps",
-            "intermediate_steps": [],
+            "error": err_msg,
+            "intermediate_steps": list(captured_steps),
         }
     except Exception as exc:  # noqa: BLE001
         logger.exception("Agent pipeline failed for %s", video_id)
-        return {"status": "failed", "error": f"{exc!s}", "intermediate_steps": []}
+        # L7: 同样如实记录 captured_steps，不撒谎
+        return {
+            "status": "failed",
+            "error": f"{exc!s}",
+            "intermediate_steps": list(captured_steps),
+        }
 
 
 def _extract_step(result: dict, tool_name: str, field: str) -> str | None:
@@ -167,3 +195,37 @@ def get_agent_executor():
     if _executor_singleton is None:
         _executor_singleton = build_agent_executor()
     return _executor_singleton
+
+
+class _StepCaptureCallback(AsyncCallbackHandler):
+    """LangChain async callback —— 每个 tool call 完成后把 (tool, output) 写到外部 list。
+
+    L7 (2026-07-26) 修复 silent-failure：即便 asyncio.wait_for 因超时 cancel
+    inner task，callback 已 fire 的步骤仍然保留；TimeoutError 路径能返回
+    真实 intermediate_steps 而非真空。
+    """
+
+    def __init__(self, sink: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._sink = sink
+        # on_tool_start 时按 run_id 记 tool 名，on_tool_end 时查回。
+        self._run_id_to_tool: dict[str, str] = {}
+
+    async def on_tool_start(
+        self,
+        serialized: dict[str, Any],
+        input_str: str,
+        *,
+        run_id: Any,
+        **kwargs: Any,
+    ) -> None:
+        tool_name = (serialized or {}).get("name") or "unknown"
+        self._run_id_to_tool[str(run_id)] = tool_name
+
+    async def on_tool_end(self, output: Any, *, run_id: Any, **kwargs: Any) -> None:
+        tool_name = self._run_id_to_tool.pop(str(run_id), "unknown")
+        try:
+            output_str = output if isinstance(output, str) else json.dumps(output)
+        except (TypeError, ValueError):
+            output_str = str(output)
+        self._sink.append({"tool": tool_name, "output": output_str})

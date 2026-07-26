@@ -35,7 +35,7 @@ async def analyze_hotspot(
     """
     if adapter is None:
         settings = get_settings()
-        api_key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else ""
+        api_key = settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else ""
         if not api_key:
             logger.warning("No LLM API key configured; using heuristic analysis")
             return _heuristic_analysis(keyword, content)

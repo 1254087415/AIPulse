@@ -55,9 +55,9 @@ def _build_settings(
     return AppSettings(
         data_dir=data_dir,
         download_dir=data_dir / "downloads",
-        kimi_api_key=kimi_key,
-        kimi_base_url="https://api.kimi.com/coding/v1",
-        kimi_model="kimi-for-coding",
+        KIMI_API_KEY=kimi_key,
+        KIMI_BASE_URL="https://api.kimi.com/coding/v1",
+        KIMI_MODEL="kimi-for-coding",
         obsidian_vault_path=Path(obsidian_path),
         obsidian_archive_folder="AIPulse",
         wechat_appid="wx-test",
@@ -206,17 +206,69 @@ async def test_patch_settings_updates_non_secret_field(tmp_path: Path) -> None:
     assert settings.kimi_api_key.get_secret_value() == "sk-initial-kimi-1234567890"
 
 
-async def test_patch_settings_invalid_obsidian_path_returns_400(tmp_path: Path) -> None:
+async def test_patch_settings_invalid_obsidian_path_returns_422(tmp_path: Path) -> None:
+    """Spec E4: PATCH with a non-existent obsidian_vault_path must return 422.
+
+    The validation must happen at the Pydantic schema layer (so the response
+    status is 422, not 400) — FastAPI auto-translates ValidationError /
+    RequestValidationError into a 422 envelope, which is the conventional
+    shape for "the payload itself is bad".
+    """
+    from pydantic import ValidationError
+    from aipulse.web.schemas import SettingsUpdate
+
     settings = _build_settings(tmp_path=tmp_path)
-    payload = MagicMock()
-    payload.model_dump = MagicMock(return_value={"obsidian_vault_path": "/no/such/dir/999"})
+
+    # Schema-level validation fires immediately on construction; in a real
+    # FastAPI handler the same error is caught and wrapped into a 422
+    # RequestValidationError. We assert on the underlying ValidationError
+    # class here so the test does not need a full ASGI test client.
+    with pytest.raises(ValidationError) as exc_info:
+        SettingsUpdate(obsidian_vault_path="/no/such/dir_xyz_999")
+
+    assert "obsidian vault path does not exist" in str(exc_info.value)
+
+
+async def test_patch_settings_obsidian_path_accepts_existing_dir(tmp_path: Path) -> None:
+    """Spec E4: an existing directory passes schema validation; handler
+    then performs the actual update.
+
+    Uses a real (existing) directory under tmp_path so Pydantic does not
+    reject the payload with 422.
+    """
+    from aipulse.web.schemas import SettingsUpdate
+
+    existing = tmp_path / "real-vault"
+    existing.mkdir()
+    settings = _build_settings(tmp_path=tmp_path)
+    payload = SettingsUpdate(obsidian_vault_path=str(existing))
 
     with patch(GET_SETTINGS_TARGET, return_value=settings):
         with patch(RESET_SETTINGS_TARGET):
-            with pytest.raises(HTTPException) as exc_info:
-                await patch_settings_route(payload)
+            response = await patch_settings_route(payload)
 
-    assert exc_info.value.status_code == 400
+    assert response["success"] is True
+    assert str(existing) in str(settings.obsidian_vault_path)
+
+
+async def test_patch_settings_obsidian_path_empty_passes(tmp_path: Path) -> None:
+    """Empty obsidian_vault_path passes schema validation (caller is
+    clearing / not changing the vault).
+
+    Validation should only fire when the value is non-empty; this lets the
+    UI PATCH other fields without triggering an obsidian-specific error.
+    """
+    from aipulse.web.schemas import SettingsUpdate
+
+    settings = _build_settings(tmp_path=tmp_path)
+    payload = SettingsUpdate(kimi_model="kimi-k2-thinking")
+
+    with patch(GET_SETTINGS_TARGET, return_value=settings):
+        with patch(RESET_SETTINGS_TARGET):
+            response = await patch_settings_route(payload)
+
+    assert response["success"] is True
+    assert settings.kimi_model == "kimi-k2-thinking"
 
 
 async def test_patch_settings_response_returns_masked_secrets(tmp_path: Path) -> None:

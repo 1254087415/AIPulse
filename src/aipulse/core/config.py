@@ -7,13 +7,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
 _SECRET_KEYS = {
-    "llm_api_key",
     "kimi_api_key",
     "feishu_secret",
     "wechat_appsecret",
@@ -42,20 +41,22 @@ class AppSettings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/aipulse.db"
     auto_create_tables: bool = False
 
-    # LLM
+    # LLM (Kimi) — single source of truth. Legacy ``llm_*`` env names
+    # (``LLM_API_KEY``/``LLM_BASE_URL``/``LLM_MODEL``) are still accepted via
+    # ``validation_alias`` for backward compatibility with existing .env files.
     llm_provider: str = "openai"
-    llm_api_key: SecretStr = Field(default=SecretStr(""))
-    llm_base_url: str = "https://api.kimi.com/coding/v1"
-    llm_model: str = "kimi-for-coding"
-
-    # v0.3 — Kimi specific (independent config; used by follow + learning phase)
-    # NOTE: kimi_* defaults are aligned with the Kimi coding endpoint per
-    # v0.3 spec §5.3 (kimi-for-coding + api.kimi.com/coding/v1). If the user
-    # later decides to keep llm_* as the canonical Kimi path instead, this
-    # block can be reverted.
-    kimi_api_key: SecretStr = Field(default=SecretStr(""))
-    kimi_base_url: str = "https://api.kimi.com/coding/v1"
-    kimi_model: str = "kimi-for-coding"
+    kimi_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("KIMI_API_KEY", "LLM_API_KEY"),
+    )
+    kimi_base_url: str = Field(
+        default="https://api.kimi.com/coding/v1",
+        validation_alias=AliasChoices("KIMI_BASE_URL", "LLM_BASE_URL"),
+    )
+    kimi_model: str = Field(
+        default="kimi-for-coding",
+        validation_alias=AliasChoices("KIMI_MODEL", "LLM_MODEL"),
+    )
     learning_notification_enabled: bool = True
 
     # Whisper
@@ -119,14 +120,14 @@ class AppSettings(BaseSettings):
         self.scripts_dir.mkdir(parents=True, exist_ok=True)
 
         # Reload from the persisted JSON if it exists, so changes made via
-        # PATCH /api/settings survive process restarts.
+        # PATCH /api/settings survive process restarts. Apply the merge
+        # in-place (via ``update()``) to avoid constructing a new instance
+        # which would re-run ``model_post_init`` and re-parse ``.env``,
+        # recursing until the dotenv parser blows the stack.
         persisted = self._load_persisted()
         if persisted:
             try:
-                # Re-construct via model_validate so Pydantic re-runs the field
-                # validators and converts Path / SecretStr etc. correctly.
-                merged = self.model_validate({**self.model_dump(), **persisted})
-                object.__setattr__(self, "__dict__", merged.__dict__)
+                self.update(**persisted)
             except Exception:  # noqa: BLE001 — defensive: never block init
                 logger.exception("Failed to merge persisted settings")
 
@@ -194,8 +195,6 @@ class AppSettings(BaseSettings):
         # Only persist keys that may be changed at runtime.
         persist_keys = {
             "llm_provider",
-            "llm_base_url",
-            "llm_model",
             "kimi_base_url",
             "kimi_model",
             "learning_notification_enabled",
@@ -222,11 +221,14 @@ class AppSettings(BaseSettings):
         # Secrets: persist only when the user explicitly set a non-empty value
         # via PATCH /api/settings. Empty secrets are omitted so .env remains
         # the source of truth for unset secrets and a partial PATCH cannot
-        # silently clear a previously persisted secret.
+        # silently clear a previously persisted secret. The on-disk value is
+        # masked (first4***last4 / ***) — the real secret stays in memory
+        # and is never written to disk, so a leaked settings.json cannot
+        # leak credentials (spec §9.5 / E6 follow-up).
         for key in _SECRET_KEYS:
             value = full.get(key)
             if value:
-                payload[key] = value
+                payload[key] = self._mask_secret(value)
         try:
             self.settings_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, default=str),

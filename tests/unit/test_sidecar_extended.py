@@ -291,7 +291,7 @@ class TestUpdateSettings:
             resp = await sidecar.handle_request(
                 JsonRpcRequest(
                     method="update_settings",
-                    params={"llm_model": "bad"},
+                    params={"kimi_model": "bad"},
                 )
             )
         finally:
@@ -307,7 +307,7 @@ class TestUpdateSettings:
         """update() 成功 → save + reset_settings + to_public_dict (226-234)"""
         # 直接给 sidecar.settings 整体替换成 fake（Pydantic 不允许 setattr mock）
         new_settings = MagicMock()
-        new_settings.to_public_dict.return_value = {"llm_model": "x"}
+        new_settings.to_public_dict.return_value = {"kimi_model": "x"}
         new_settings.update.return_value = new_settings
         new_settings.save = MagicMock()
 
@@ -322,14 +322,14 @@ class TestUpdateSettings:
                 resp = await sidecar.handle_request(
                     JsonRpcRequest(
                         method="update_settings",
-                        params={"llm_model": "x"},
+                        params={"kimi_model": "x"},
                     )
                 )
         finally:
             sidecar.settings = original
 
         assert resp.error is None
-        assert resp.result == {"llm_model": "x"}
+        assert resp.result == {"kimi_model": "x"}
         new_settings.save.assert_called_once()
 
 

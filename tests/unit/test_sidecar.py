@@ -75,8 +75,11 @@ async def test_retry_task_resets_status(sidecar: Sidecar) -> None:
 
 
 @pytest.mark.unit
-async def test_get_settings_masks_secrets(tmp_path: Path) -> None:
-    # 不依赖 sidecar fixture — 强制构造不走 .env 的 settings
+async def test_get_settings_masks_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 不依赖 sidecar fixture — 强制构造不走 .env 的 settings。屏蔽 conftest
+    # 在 os.environ 里放的 KIMI_API_KEY 占位符，让本测试看到的是真正的空 secret。
+    monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     reset_settings()
     settings = AppSettings(  # type: ignore[call-arg]
         _env_file=None,
@@ -87,9 +90,9 @@ async def test_get_settings_masks_secrets(tmp_path: Path) -> None:
     sc = Sidecar(settings=settings)
     result = await sc.handle_request(JsonRpcRequest(method="get_settings", params={}))
     assert result.error is None
-    assert result.result["llm_base_url"] == "https://api.kimi.com/coding/v1"
-    assert result.result["llm_model"] == "kimi-for-coding"
-    assert result.result["llm_api_key"] == ""
+    assert result.result["kimi_base_url"] == "https://api.kimi.com/coding/v1"
+    assert result.result["kimi_model"] == "kimi-for-coding"
+    assert result.result["kimi_api_key"] == ""
 
 
 @pytest.mark.unit
@@ -97,15 +100,15 @@ async def test_update_settings_persists_changes(sidecar: Sidecar, tmp_path: Path
     result = await sidecar.handle_request(
         JsonRpcRequest(
             method="update_settings",
-            params={"llm_model": "kimi-latest"},
+            params={"kimi_model": "kimi-latest"},
         )
     )
     assert result.error is None
-    assert result.result["llm_model"] == "kimi-latest"
+    assert result.result["kimi_model"] == "kimi-latest"
     settings_file = tmp_path / "data" / "settings.json"
     assert settings_file.exists()
     persisted = json.loads(settings_file.read_text(encoding="utf-8"))
-    assert persisted["llm_model"] == "kimi-latest"
+    assert persisted["kimi_model"] == "kimi-latest"
 
 
 @pytest.mark.unit
@@ -177,4 +180,4 @@ async def test_main_parses_line_and_responds(monkeypatch, tmp_path: Path) -> Non
     assert len(stdout_lines) == 1
     response = json.loads(stdout_lines[0])
     assert response["id"] == 1
-    assert response["result"]["llm_model"] == "kimi-for-coding"
+    assert response["result"]["kimi_model"] == "kimi-for-coding"

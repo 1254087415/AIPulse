@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -50,10 +50,18 @@ async def test_append_obsidian_task_writes_markdown_line(
     note.parent.mkdir(parents=True, exist_ok=True)
     note.write_text("body\n", encoding="utf-8")
 
-    ok = await append_obsidian_task(
-        str(note),
-        scheduled_at="2026-08-01T10:00:00+00:00",
-        topic="LangChain ReAct",
+    with patch("aipulse.apple.reminders.create_reminder", new_callable=AsyncMock) as create:
+        ok = await append_obsidian_task(
+            str(note),
+            scheduled_at="2026-08-01T10:00:00+00:00",
+            topic="LangChain ReAct",
+        )
+
+    create.assert_awaited_once_with(
+        title="LangChain ReAct",
+        due_date="2026-08-01T10:00:00+00:00",
+        notes=f"AIPulse 学习提醒\n笔记：{note}",
+        list_name="AIPulse测试",
     )
     assert ok is True
     content = note.read_text(encoding="utf-8")

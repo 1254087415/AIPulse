@@ -99,6 +99,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "e2e: End-to-end tests",
+    "real_bilibili: Real-Bilibili-network integration tests (opt-in via AIPULSE_REAL_BILIBILI=1). Skipped by default; requires explicit env var + pytest -m real_bilibili. Prevents mock-passing CI pollution and IP anti-bot risk.",
 ]
 
 [tool.coverage.run]

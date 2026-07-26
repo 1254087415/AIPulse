@@ -119,7 +119,12 @@ class TestRunPipelineErrors:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_timeout_returns_partial_status(self):
-        """AgentExecutor 超时 → status=partial"""
+        """AgentExecutor 超时 → status=partial。
+
+        L7 (2026-07-26) 修复：timeout 路径必须如实记录 captured_steps，
+        error 文案与 intermediate_steps 真值一致。callback 没 fire → 文案
+        说"未记录"，intermediate_steps 为空 list（不允许撒谎说"已记录"）。
+        """
 
         fake_executor = MagicMock()
 
@@ -143,6 +148,10 @@ class TestRunPipelineErrors:
 
         assert result["status"] == "partial"
         assert "超时" in result["error"]
+        # L7：错误文案 + 中间步骤 一致（不能撒谎说"已记录"实际真空）
+        assert "未记录" in result["error"], (
+            f"error 文案必须反映 captured_steps=0 实际状态，got: {result['error']}"
+        )
         assert result["intermediate_steps"] == []
 
     @pytest.mark.unit
@@ -166,6 +175,174 @@ class TestRunPipelineErrors:
 
         assert result["status"] == "failed"
         assert "API exploded" in result["error"]
+
+
+class TestStepCaptureCallback:
+    """L7 (2026-07-26)：TimeoutError 路径必须如实记录 intermediate_steps。
+
+    silent-failure 复现：旧实现 TimeoutError 时返回 ``intermediate_steps=[]``
+    但 error 文案说"已记录 intermediate_steps"——契约自相矛盾。
+
+    新实现用 LangChain AsyncCallbackHandler 实时捕获每个 tool call 到
+    外层 mutable list，TimeoutError 时返回 captured_steps 真值。
+    """
+
+    @pytest.mark.unit
+    def test_callback_records_tool_call_pair(self):
+        """on_tool_start 记 tool 名，on_tool_end 写入 (tool, output)。"""
+        from aipulse.summarizers.agent.runner import _StepCaptureCallback
+        from uuid import uuid4
+
+        sink: list[dict[str, object]] = []
+        cb = _StepCaptureCallback(sink)
+        run_id = uuid4()
+
+        # 同步驱动（AsyncCallbackHandler 的 on_tool_end 是 async，
+        # 但 asyncio.run 能包装；这里直接用 asyncio.get_event_loop().run_until_complete 不必要，
+        # 因为回调内部只是同步 append —— 我们直接 await None 不行，必须调度到 loop）
+        import asyncio
+        asyncio.run(
+            cb.on_tool_start(
+                serialized={"name": "fetch_transcript"},
+                input_str="BV1",
+                run_id=run_id,
+            )
+        )
+        asyncio.run(cb.on_tool_end(output="字幕 OK", run_id=run_id))
+
+        assert len(sink) == 1
+        assert sink[0]["tool"] == "fetch_transcript"
+        assert sink[0]["output"] == "字幕 OK"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_timeout_with_callback_fires_keeps_real_steps(self):
+        """TimeoutError 触发时，callback 已 fire 的步骤必须保留并出现在 result。
+
+        模拟：executor 的 ainvoke 真的跑了一个 tool call（callback fire），
+        然后被 wait_for 超时 cancel。run_summary_pipeline 应返回 captured
+        到的真实步骤，而不是真空 list。
+        """
+        from uuid import uuid4
+
+        from aipulse.summarizers.agent.runner import (
+            _StepCaptureCallback,
+            run_summary_pipeline,
+        )
+
+        fake_executor = MagicMock()
+        recorded_callbacks: list[object] = []
+
+        async def _ainvoke_with_callback(input_dict, config=None, **kwargs):
+            """模拟 LangChain：拿到 config 里的 callback，fire on_tool_start+end。"""
+            cbs = (config or {}).get("callbacks") or []
+            recorded_callbacks.extend(cbs)
+            cb = cbs[0]
+            run_id = uuid4()
+            await cb.on_tool_start(
+                serialized={"name": "fetch_transcript"},
+                input_str="BV1test",
+                run_id=run_id,
+            )
+            await cb.on_tool_end(
+                output='{"ok": true, "transcript": "字幕 ABC"}',
+                run_id=run_id,
+            )
+            # 再来一个 step
+            run_id2 = uuid4()
+            await cb.on_tool_start(
+                serialized={"name": "summarize"},
+                input_str="BV1test",
+                run_id=run_id2,
+            )
+            await cb.on_tool_end(
+                output='{"ok": true, "markdown": "# Title"}',
+                run_id=run_id2,
+            )
+            # 模拟超时：阻塞足够久让外层 wait_for 触发 TimeoutError
+            await asyncio.sleep(10)
+
+        fake_executor.ainvoke = _ainvoke_with_callback
+
+        with patch(
+            "aipulse.summarizers.agent.runner.build_agent_executor",
+            return_value=fake_executor,
+        ):
+            with patch(
+                "aipulse.summarizers.agent.runner.asyncio.wait_for"
+            ) as mock_wait:
+
+                async def _raise_timeout(awaitable, timeout):
+                    # 先让 awaitable 开始执行（让 callback 跑完 2 个 tool）
+                    try:
+                        await awaitable
+                    except asyncio.CancelledError:
+                        pass
+                    raise asyncio.TimeoutError()
+
+                mock_wait.side_effect = _raise_timeout
+                result = await run_summary_pipeline(
+                    video_id="BV1timeout_with_steps",
+                    title="t",
+                    up_name="up",
+                )
+
+        assert result["status"] == "partial"
+        # L7：error 文案说"已记录 N 个"必须和真实 captured_steps 数量一致
+        assert "已记录" in result["error"], (
+            f"error 应说'已记录'因为 captured_steps>0，got: {result['error']}"
+        )
+        assert "2 个" in result["error"]
+        # captured_steps 真值：2 个 tool call
+        assert len(result["intermediate_steps"]) == 2
+        assert result["intermediate_steps"][0]["tool"] == "fetch_transcript"
+        assert result["intermediate_steps"][1]["tool"] == "summarize"
+        # callback 真被传到 config
+        assert len(recorded_callbacks) == 1
+        assert isinstance(recorded_callbacks[0], _StepCaptureCallback)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_callback_does_not_swallow_exception_output(self):
+        """异常路径（除 TimeoutError 外）也如实返回 captured_steps。
+
+        silent-failure 修复不仅覆盖 TimeoutError；所有路径的
+        intermediate_steps 都不能撒谎。
+        """
+        from uuid import uuid4
+
+        from aipulse.summarizers.agent.runner import _StepCaptureCallback
+
+        fake_executor = MagicMock()
+
+        async def _ainvoke_then_explode(input_dict, config=None, **kwargs):
+            cb = (config or {}).get("callbacks", [None])[0]
+            run_id = uuid4()
+            await cb.on_tool_start(
+                serialized={"name": "fetch_transcript"},
+                input_str="BV1",
+                run_id=run_id,
+            )
+            await cb.on_tool_end(output="字幕行 1\n字幕行 2", run_id=run_id)
+            raise RuntimeError("Kimi 502")
+
+        fake_executor.ainvoke = _ainvoke_then_explode
+
+        with patch(
+            "aipulse.summarizers.agent.runner.build_agent_executor",
+            return_value=fake_executor,
+        ):
+            result = await run_summary_pipeline(
+                video_id="BV1generic_fail",
+                title="t",
+                up_name="up",
+            )
+
+        assert result["status"] == "failed"
+        assert "Kimi 502" in result["error"]
+        # 即使 raise 了，callback 已 fire 的 fetch_transcript 也得留着
+        assert len(result["intermediate_steps"]) == 1
+        assert result["intermediate_steps"][0]["tool"] == "fetch_transcript"
 
     @pytest.mark.unit
     @pytest.mark.asyncio

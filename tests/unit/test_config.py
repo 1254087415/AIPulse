@@ -19,28 +19,28 @@ def settings(tmp_path: Path) -> AppSettings:
 
 
 @pytest.mark.unit
-def test_default_llm_settings(settings: AppSettings) -> None:
-    assert settings.llm_base_url == "https://api.kimi.com/coding/v1"
-    assert settings.llm_model == "kimi-for-coding"
+def test_default_kimi_settings(settings: AppSettings) -> None:
+    assert settings.kimi_base_url == "https://api.kimi.com/coding/v1"
+    assert settings.kimi_model == "kimi-for-coding"
     assert settings.llm_provider == "openai"
 
 
 @pytest.mark.unit
 def test_public_dict_masks_secrets(settings: AppSettings) -> None:
-    settings = settings.update(llm_api_key="sk-secret-value")
+    settings = settings.update(kimi_api_key="sk-secret-value")
     public = settings.to_public_dict()
-    assert public["llm_api_key"] == "sk-s***alue"
-    assert public["llm_base_url"] == "https://api.kimi.com/coding/v1"
+    assert public["kimi_api_key"] == "sk-s***alue"
+    assert public["kimi_base_url"] == "https://api.kimi.com/coding/v1"
 
 
 @pytest.mark.unit
 def test_save_persists_non_secret_overrides(settings: AppSettings) -> None:
     settings = settings.update(
-        llm_model="kimi-latest", llm_api_key="sk-secret-value"
+        kimi_model="kimi-latest", kimi_api_key="sk-secret-value"
     )
     settings.save()
     persisted = json.loads(settings.settings_path.read_text(encoding="utf-8"))
-    assert persisted["llm_model"] == "kimi-latest"
+    assert persisted["kimi_model"] == "kimi-latest"
 
 
 @pytest.mark.unit
@@ -49,7 +49,10 @@ def test_save_persists_non_empty_secrets(settings: AppSettings) -> None:
     survive process restarts (CLAUDE.md: 必须保留 secrets).
 
     Empty secrets are skipped so a PATCH with no secret does not overwrite
-    a previously persisted value with an empty string.
+    a previously persisted value with an empty string. Non-empty secrets are
+    masked on disk (first4***last4) so a leaked settings.json cannot leak
+    credentials (E6 spec §9.5 follow-up) — the real secret stays in memory
+    via ``to_client_dict()``.
     """
     settings = settings.update(
         kimi_api_key="sk-persist-kimi-1234567890",
@@ -58,9 +61,10 @@ def test_save_persists_non_empty_secrets(settings: AppSettings) -> None:
     )
     settings.save()
     persisted = json.loads(settings.settings_path.read_text(encoding="utf-8"))
-    assert persisted["kimi_api_key"] == "sk-persist-kimi-1234567890"
-    assert persisted["wechat_appsecret"] == "wechat-persist-1234567890"
-    assert persisted["feishu_secret"] == "feishu-persist-1234567890"
+    # Real values never written to disk; only masked previews survive.
+    assert persisted["kimi_api_key"] == "sk-p***7890"
+    assert persisted["wechat_appsecret"] == "wech***7890"
+    assert persisted["feishu_secret"] == "feis***7890"
 
 
 @pytest.mark.unit
@@ -84,11 +88,16 @@ def test_save_skips_empty_secrets(settings: AppSettings) -> None:
 
 @pytest.mark.unit
 def test_loaded_settings_use_persisted_secret(tmp_path: Path) -> None:
-    """A fresh AppSettings constructed against a directory containing a
-    settings.json with a non-empty kimi_api_key must read that value.
+    """Verify the E6 on-disk secret contract: real values never survive a
+    process restart, but a masked preview is persisted so the UI can show
+    "secret is set" without leaking the credential.
 
-    This simulates the "process restart" scenario: PATCH writes to disk,
-    next process boot reloads it via _load_persisted() in model_post_init.
+    Pre-E6 behaviour (real secret round-tripped via settings.json) was
+    retired in favour of leaking nothing on disk (spec §9.5 / E6 follow-up).
+    The new contract: ``save()`` writes the masked preview, the next process
+    boot loads that masked preview, ``update()`` recognises the ``***``
+    pattern and discards it so the env (or empty fallback) is the source of
+    truth for the real value.
     """
     reset_settings()
     data_dir = tmp_path / "data"
@@ -102,24 +111,31 @@ def test_loaded_settings_use_persisted_secret(tmp_path: Path) -> None:
     first = first.update(kimi_api_key="sk-restart-survive-AAAAAAAA")
     first.save()
 
+    # On-disk value is masked, not plaintext — that's the security contract.
+    persisted = json.loads(first.settings_path.read_text(encoding="utf-8"))
+    assert persisted["kimi_api_key"] == "sk-r***AAAA"
+
     # Second AppSettings is constructed fresh (no in-memory carryover)
-    # against the same data_dir; its model_post_init must read the secret
-    # back from settings.json.
+    # against the same data_dir; its model_post_init reads settings.json,
+    # detects the masked preview via ``***``, and discards it so the real
+    # value falls back to KIMI_API_KEY env (test placeholder in this run).
     reset_settings()
     second = AppSettings(
         data_dir=data_dir,
         download_dir=data_dir / "downloads",
         database_url=f"sqlite+aiosqlite:///{tmp_path}/aipulse.db",
     )
-    assert second._get_secret_value("kimi_api_key") == "sk-restart-survive-AAAAAAAA"
+    # In this test the env provides a placeholder, so the secret reflects the
+    # env, NOT the masked on-disk preview.
+    assert second._get_secret_value("kimi_api_key") == "sk-test-placeholder-kimi"
 
 
 @pytest.mark.unit
 def test_client_dict_returns_real_secret_values(settings: AppSettings) -> None:
-    settings = settings.update(llm_api_key="sk-secret-value")
+    settings = settings.update(kimi_api_key="sk-secret-value")
     client = settings.to_client_dict()
-    assert client["llm_api_key"] == "sk-secret-value"
-    assert client["llm_base_url"] == "https://api.kimi.com/coding/v1"
+    assert client["kimi_api_key"] == "sk-secret-value"
+    assert client["kimi_base_url"] == "https://api.kimi.com/coding/v1"
 
 
 @pytest.mark.unit
@@ -129,9 +145,9 @@ def test_update_returns_same_instance_with_mutation(settings: AppSettings) -> No
     silently overwriting caller-provided changes — see config.py
     ``update()`` docstring for the rationale.
     """
-    updated = settings.update(llm_model="kimi-latest")
+    updated = settings.update(kimi_model="kimi-latest")
     assert updated is settings
-    assert updated.llm_model == "kimi-latest"
+    assert updated.kimi_model == "kimi-latest"
 
 
 @pytest.mark.unit
