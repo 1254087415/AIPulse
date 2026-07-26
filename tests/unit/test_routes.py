@@ -127,24 +127,62 @@ async def test_get_related_hotspots_route_returns_items() -> None:
 
 @pytest.mark.unit
 async def test_archive_hotspot_route_returns_paths() -> None:
-    session = MagicMock()
-    paths = {"source_note_path": "/a/b.md", "summary_note_path": "/a/c.md"}
-    with patch("aipulse.web.routes.archive_hotspot_service", return_value=paths) as mock:
+    from aipulse.archive.service import ArchiveOutcome
+
+    session = AsyncMock()
+    hotspot = MagicMock()
+    hotspot.id = "h1"
+    hotspot.content_id = "v1"
+    hotspot.title = "video"
+    hotspot.summary = "summary"
+    hotspot.followed_up_id = None
+    session.get.return_value = hotspot
+
+    outcome = ArchiveOutcome(
+        note_path="/a/b.md",
+        learning_event_id=42,
+        reminder_id="rem-1",
+        obsidian_task_written=True,
+        errors=[],
+    )
+    with patch("aipulse.web.routes.archive_three_way", return_value=outcome) as mock:
         result = await archive_hotspot_route("h1", session)
-    mock.assert_awaited_once_with(session, "h1")
+    mock.assert_awaited_once()
     assert result["success"] is True
-    assert result["data"] == paths
+    assert result["data"]["note_path"] == "/a/b.md"
+    assert result["data"]["learning_event_id"] == 42
+    assert result["data"]["obsidian_task_written"] is True
 
 
 @pytest.mark.unit
-async def test_archive_hotspot_route_raises_400_when_not_configured() -> None:
-    session = MagicMock()
-    with (
-        patch("aipulse.web.routes.archive_hotspot_service", side_effect=FileNotFoundError("no vault")),
-        pytest.raises(Exception) as exc_info,
-    ):
-        await archive_hotspot_route("h1", session)
-    assert exc_info.value.status_code == 400
+async def test_archive_hotspot_route_returns_failure_envelope_when_obsidian_missing() -> None:
+    from aipulse.archive.service import ArchiveOutcome
+
+    session = AsyncMock()
+    hotspot = MagicMock()
+    hotspot.id = "h1"
+    hotspot.content_id = "v1"
+    hotspot.title = "video"
+    hotspot.summary = "summary"
+    hotspot.followed_up_id = None
+    session.get.return_value = hotspot
+
+    # 模拟 obsidian_note 写失败：archive_three_way 返回 note_path=None + errors
+    outcome = ArchiveOutcome(
+        note_path=None,
+        learning_event_id=None,
+        reminder_id=None,
+        obsidian_task_written=False,
+        errors=["obsidian_note: vault not configured"],
+    )
+    with patch("aipulse.web.routes.archive_three_way", return_value=outcome) as mock:
+        result = await archive_hotspot_route("h1", session)
+    mock.assert_awaited_once()
+    # spec 06 §7.2 三方向容错：obsidian 失败 → data.note_path=None + errors 非空
+    # success=True 是 routes.py 设计选择（整体 fail 不抛异常，前端读 errors 处理）
+    assert result["success"] is True
+    assert result["data"]["note_path"] is None
+    assert "obsidian_note" in result["data"]["errors"][0]
 
 
 @pytest.mark.unit

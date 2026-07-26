@@ -76,6 +76,24 @@ async def create_followed_up_route(
     """
     repo = SqlAlchemyFollowedUpRepository(session)
 
+    # spec 09 TC-API-FOLLOWED-UP-04: 超过 20 个 UP 主上限 → 422
+    existing_count = await repo.count_active()
+    MAX_FOLLOW_LIMIT = 20
+    if existing_count >= MAX_FOLLOW_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "success": False,
+                "error": "FOLLOW_LIMIT_EXCEEDED",
+                "message": (
+                    f"已达 UP 主上限 {MAX_FOLLOW_LIMIT} 个；"
+                    "删除部分 UP 主后再添加。"
+                ),
+                "max_size": MAX_FOLLOW_LIMIT,
+                "current_count": existing_count,
+            },
+        )
+
     display_name = payload.display_name
     profile_url = payload.profile_url
 
