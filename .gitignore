@@ -168,6 +168,10 @@ data/downloads/
 data/cache/
 # Local settings.json may carry secrets (kimi_api_key etc.) — never tracked
 data/settings.json
+# Whole data/ dir is local-only (SQLite + transcripts cache + downloads +
+# scripts + secrets-bearing settings). Sub-files above also ignored
+# individually; this top-level entry suppresses "?? data/" in git status.
+data/
 
 # Local Claude/ECC configuration and drafts
 .claude/
