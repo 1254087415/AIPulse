@@ -103,6 +103,22 @@ describe('AddFollowForm (URL input)', () => {
     wrapper.unmount()
   })
 
+  it('submits a bilibili uid containing an underscore without truncation', async () => {
+    const wrapper = mountForm()
+    await wrapper.find('[data-testid="url-input"]').setValue(
+      'https://space.bilibili.com/123_456',
+    )
+    await flushPromises()
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')![0]).toEqual([
+      { platform: 'bilibili', uid: '123_456' },
+    ])
+
+    wrapper.unmount()
+  })
+
   it('does not call the API on its own — the parent owns createFollowed', async () => {
     const wrapper = mountForm()
     await wrapper.find('[data-testid="url-input"]').setValue(
