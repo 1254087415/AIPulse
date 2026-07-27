@@ -181,6 +181,9 @@ docs/_build/
 # 需要时显式 `git add -f docs/.screenshots/<file>.png`
 docs/.screenshots/*.png
 
+# 旧 v0.2 web/ 目录 (迁移到 frontend/ 后未删, 但已 untracked)
+web/
+
 # Environment variable variants
 .env.*
 .env.local
