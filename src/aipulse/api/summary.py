@@ -299,10 +299,13 @@ async def summary_events_by_query_route(
         )
         record = (await session.execute(stmt)).scalar_one_or_none()
         if record is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"no summary job found for video_id={target}",
-            )
+            async def not_found_event():
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"video_id": target, "error": "not_found"}),
+                }
+
+            return EventSourceResponse(not_found_event())
         job_id = record.id
 
     return await summary_events_route(job_id, request)

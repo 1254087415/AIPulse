@@ -118,6 +118,28 @@ async def test_get_job_returns_404_for_unknown_id(client) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_sse_not_found_returns_error_event_for_query_and_job_path(client) -> None:
+    missing_id = "missing-sse-job"
+
+    query_response = await client.get(
+        "/api/summary/events",
+        params={"bvid": missing_id},
+        headers=_bearer(),
+    )
+    path_response = await client.get(
+        f"/api/summary/events/{missing_id}",
+        headers=_bearer(),
+    )
+
+    for response in (query_response, path_response):
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "event: error" in response.text
+        assert '"error": "not_found"' in response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_list_jobs_returns_recent(client, db_session, _isolate_queue_and_pipeline) -> None:
     for vid in ("BVa", "BVb", "BVc"):
         r = await client.post(f"/api/summary/{vid}", headers=_bearer())
