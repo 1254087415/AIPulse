@@ -25,8 +25,8 @@ const emit = defineEmits<{
 }>()
 
 // Accept both numeric mid and hex-style test ids (e.g. 102d224fbda7).
-const BILIBILI_MID_PATTERN = /^[0-9a-z]{5,}$/i
-const BILIBILI_SPACE_URL_PATTERN = /space\.bilibili\.com\/([0-9a-z]+)/i
+const BILIBILI_MID_PATTERN = /^[0-9a-z_-]{5,}$/i
+const BILIBILI_SPACE_URL_PATTERN = /space\.bilibili\.com\/([0-9a-z_-]+)/i
 
 function extractBilibiliMid(raw: string): string | null {
   const trimmed = raw.trim()
