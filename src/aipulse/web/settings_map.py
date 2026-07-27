@@ -32,6 +32,7 @@ _SECTIONS: dict[str, tuple[str, ...]] = {
         "wechat_send_script",
     ),
     "feishu": ("feishu_webhook_url", "feishu_secret"),
+    "api_auth": ("aipulse_api_token",),
 }
 
 

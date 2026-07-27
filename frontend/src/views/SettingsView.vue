@@ -14,6 +14,7 @@ interface Settings {
   wechat_appsecret: string
   wechat_template_id: string
   wechat_openid: string
+  aipulse_api_token: string
 }
 
 interface PanelState {
@@ -21,12 +22,14 @@ interface PanelState {
   obsidian: boolean
   feishu: boolean
   wechat: boolean
+  api_auth: boolean
 }
 
 const PASSWORD_FIELDS = new Set([
   'llm_api_key',
   'feishu_secret',
   'wechat_appsecret',
+  'aipulse_api_token',
 ])
 
 const settings = reactive<Settings>({
@@ -41,6 +44,7 @@ const settings = reactive<Settings>({
   wechat_appsecret: '',
   wechat_template_id: '',
   wechat_openid: '',
+  aipulse_api_token: '',
 })
 
 const expanded = ref<PanelState>({
@@ -48,12 +52,14 @@ const expanded = ref<PanelState>({
   obsidian: false,
   feishu: false,
   wechat: false,
+  api_auth: false,
 })
 
 const passwordVisible = ref<Record<string, boolean>>({
   llm_api_key: false,
   feishu_secret: false,
   wechat_appsecret: false,
+  aipulse_api_token: false,
 })
 
 const saving = ref(false)
@@ -101,6 +107,7 @@ function applySettings(data: SettingsResponse): void {
   settings.wechat_appsecret = data.wechat?.wechat_appsecret ?? ''
   settings.wechat_template_id = data.wechat?.wechat_template_id ?? ''
   settings.wechat_openid = data.wechat?.wechat_openid ?? ''
+  settings.aipulse_api_token = data.api_auth?.aipulse_api_token ?? ''
   initialSnapshot = { ...settings }
 }
 
@@ -388,6 +395,44 @@ onUnmounted(() => {
           <input id="wechat-openid" v-model="settings.wechat_openid" type="text" />
         </div>
       </div>
+
+      <div
+        class="panel"
+        :class="{ 'is-expanded': expanded.api_auth }"
+        data-testid="panel-api-auth"
+      >
+        <button
+          class="panel-header"
+          data-testid="panel-api-auth-header"
+          @click="togglePanel('api_auth')"
+        >
+          <span class="panel-icon" aria-hidden="true">{{ expanded.api_auth ? '▼' : '▶' }}</span>
+          <span class="panel-title">API 鉴权</span>
+        </button>
+        <div class="panel-body">
+          <label for="aipulse-api-token">AIPulse API Token</label>
+          <div class="password-field">
+            <input
+              id="aipulse-api-token"
+              v-model="settings.aipulse_api_token"
+              :type="getInputType('aipulse_api_token')"
+              placeholder="留空表示不启用 Bearer 鉴权"
+            />
+            <button
+              type="button"
+              class="toggle-password"
+              data-testid="toggle-aipulse-api-token"
+              @click="togglePassword('aipulse_api_token')"
+            >
+              {{ passwordVisible.aipulse_api_token ? '隐藏' : '显示' }}
+            </button>
+          </div>
+          <p class="panel-hint" data-testid="aipulse-token-hint">
+            配置后所有 <code>/api/*</code> 请求必须携带 <code>Authorization: Bearer &lt;token&gt;</code>。
+            留空则不鉴权（开发模式）。
+          </p>
+        </div>
+      </div>
     </div>
 
       <div class="actions">
@@ -581,6 +626,20 @@ input:focus {
   font-size: var(--text-xs);
   color: var(--status-red);
   text-align: center;
+}
+
+.panel-hint {
+  margin: 8px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.panel-hint code {
+  background: var(--surface-bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -102,6 +102,9 @@ class SettingsUpdate(BaseModel):
     feishu_webhook_url: str | None = None
     feishu_secret: str | None = None
 
+    # AIPulse API auth (Bearer token enforced by security_middleware)
+    aipulse_api_token: str | None = None
+
     @field_validator("obsidian_vault_path")
     @classmethod
     def _vault_path_must_exist(cls, value: str | None) -> str | None:

@@ -257,6 +257,57 @@ async def get_job_route(
     }
 
 
+@router.get("/events")
+async def summary_events_by_query_route(
+    request: Request,
+    bvid: str | None = None,
+    video_id: str | None = None,
+) -> Any:
+    """Stream SSE events for a single job identified by ``bvid`` / ``video_id``.
+
+    With no bvid/video_id, returns a heartbeat-only stream so the panel-level
+    ``subscribeSse('/api/summary/events', …)`` calls (FollowRecordsPanel,
+    FollowFailedPanel) don't 404 — they get an open connection and rely on
+    the manual refresh button for live updates.
+    """
+    target = bvid or video_id
+    if not target:
+        async def heartbeat_only():
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    await asyncio.sleep(15.0)
+                    yield {"event": "heartbeat", "data": "{}"}
+            finally:
+                pass
+
+        return EventSourceResponse(heartbeat_only())
+
+    from sqlalchemy import desc, select
+
+    from aipulse.models.summary_jobs import SummaryJob
+
+    from aipulse.store.database import get_session_maker
+
+    async with get_session_maker()() as session:
+        stmt = (
+            select(SummaryJob)
+            .where(SummaryJob.video_id == target)
+            .order_by(desc(SummaryJob.created_at))
+            .limit(1)
+        )
+        record = (await session.execute(stmt)).scalar_one_or_none()
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no summary job found for video_id={target}",
+            )
+        job_id = record.id
+
+    return await summary_events_route(job_id, request)
+
+
 @router.get("/events/{job_id}")
 async def summary_events_route(job_id: str, request: Request):
     """SSE stream of job progress events.

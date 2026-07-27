@@ -36,11 +36,16 @@ export interface FeishuGroup {
   feishu_secret: string
 }
 
+export interface ApiAuthGroup {
+  aipulse_api_token: string
+}
+
 export interface SettingsResponse {
   llm: LlmGroup
   obsidian: ObsidianGroup
   wechat: WechatGroup
   feishu: FeishuGroup
+  api_auth: ApiAuthGroup
 }
 
 export type SettingsPatch = Partial<{
@@ -61,6 +66,7 @@ export type SettingsPatch = Partial<{
   wechat_send_script: string
   feishu_webhook_url: string
   feishu_secret: string
+  aipulse_api_token: string
 }>
 
 export async function getSettings(): Promise<SettingsResponse> {
