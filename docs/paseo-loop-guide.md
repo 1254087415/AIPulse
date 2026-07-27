@@ -151,8 +151,8 @@ mcp__paseo__send_agent_prompt({
 ### 3.3 验收者创建 worker（在 worker 内部执行）
 
 ```bash
-# worker 也是 detached，UI 可见
-paseo run -d \
+# worker 也是 detached，UI 可见。必须 --worktree 隔离 + 自己 worktree 内 git commit
+paseo run -d --worktree <slug> \
   --provider claude \
   --model claude-fable-5 \
   --title "v0.3 worker · B 组 spec 01" \
@@ -163,6 +163,15 @@ paseo run -d \
   --label spec=01 \
   '<worker prompt>'
 ```
+
+**Worker 硬约束**（必加到 prompt）：
+
+1. **禁止跨 worktree 操作**：所有 FileEdit/Write/Bash 改动限制在 `${worktree_root}` 内，不许动主 checkout
+2. **必须用 git 工具**：写完跑 `git add` + `git commit -m "..."` 在 worktree 里
+3. **完成后核对**：`cd <worktree_root> && git status --short && git log --oneline main..HEAD`
+4. **禁止**用绝对路径 Edit/Write 绕过 worktree cwd
+
+（教训：2026-07-27 v0.3 spec 09 RED 修复 worker 跨 worktree 改主 checkout，dirty 全错位）
 
 ### 3.4 验收者 send worker（在验收者内部执行）
 
