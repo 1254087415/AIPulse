@@ -22,10 +22,10 @@ vi.mock('../../src/api/settings', () => ({
 import SettingsView from '../../src/views/SettingsView.vue'
 
 const groupedResponse = {
-  kimi: {
-    kimi_api_key: 'sk-***49VK',
-    kimi_base_url: 'https://api.kimi.com/coding/v1',
-    kimi_model: 'kimi-for-coding',
+  llm: {
+    llm_api_key: 'sk-***49VK',
+    llm_base_url: 'https://api.minimaxi.com/v1',
+    llm_model: 'MiniMax-M2.5',
     learning_notification_enabled: true,
   },
   obsidian: {
@@ -41,6 +41,9 @@ const groupedResponse = {
   feishu: {
     feishu_webhook_url: '',
     feishu_secret: '',
+  },
+  api_auth: {
+    aipulse_api_token: '',
   },
 }
 
@@ -80,7 +83,7 @@ describe('SettingsView (HTTP)', () => {
 
   it('renders masked secrets as their masked form (does not expose the raw value)', async () => {
     const wrapper = await mountView()
-    const apiKey = wrapper.find('#kimi-api-key').element as HTMLInputElement
+    const apiKey = wrapper.find('#llm-api-key').element as HTMLInputElement
     expect(apiKey.value).toBe('sk-***49VK')
     wrapper.unmount()
   })
@@ -91,7 +94,7 @@ describe('SettingsView (HTTP)', () => {
 
     expect(patchSettingsMock).toHaveBeenCalledTimes(1)
     const payload = patchSettingsMock.mock.calls[0][0] as Record<string, unknown>
-    expect(payload).not.toHaveProperty('kimi_api_key')
+    expect(payload).not.toHaveProperty('llm_api_key')
     expect(payload).not.toHaveProperty('feishu_secret')
     expect(payload).not.toHaveProperty('wechat_appsecret')
 
@@ -100,14 +103,14 @@ describe('SettingsView (HTTP)', () => {
 
   it('sends a non-masked secret when the user types a new value', async () => {
     const wrapper = await mountView()
-    await wrapper.find('[data-testid="toggle-kimi-api-key"]').trigger('click')
+    await wrapper.find('[data-testid="toggle-llm-api-key"]').trigger('click')
     await flushPromises()
-    await wrapper.find('#kimi-api-key').setValue('sk-new-secret-value-1234')
+    await wrapper.find('#llm-api-key').setValue('sk-new-secret-value-1234')
     await flushPromises()
     await submitForm(wrapper)
 
     const payload = patchSettingsMock.mock.calls[0][0] as Record<string, unknown>
-    expect(payload.kimi_api_key).toBe('sk-new-secret-value-1234')
+    expect(payload.llm_api_key).toBe('sk-new-secret-value-1234')
 
     wrapper.unmount()
   })
@@ -126,15 +129,15 @@ describe('SettingsView (HTTP)', () => {
 
   it('sends a PATCH /api/settings with the changed non-secret fields only', async () => {
     const wrapper = await mountView()
-    await wrapper.find('#kimi-base-url').setValue('https://api.example.com/v2')
-    await wrapper.find('#kimi-model').setValue('kimi-for-coding-2')
+    await wrapper.find('#llm-base-url').setValue('https://api.example.com/v2')
+    await wrapper.find('#llm-model').setValue('MiniMax-M2.5-custom')
     await flushPromises()
 
     await submitForm(wrapper)
 
     const payload = patchSettingsMock.mock.calls[0][0] as Record<string, unknown>
-    expect(payload.kimi_base_url).toBe('https://api.example.com/v2')
-    expect(payload.kimi_model).toBe('kimi-for-coding-2')
+    expect(payload.llm_base_url).toBe('https://api.example.com/v2')
+    expect(payload.llm_model).toBe('MiniMax-M2.5-custom')
     expect(payload).not.toHaveProperty('obsidian_vault_path') // unchanged
 
     wrapper.unmount()

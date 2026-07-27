@@ -37,7 +37,6 @@ function extractBilibiliMid(raw: string): string | null {
 }
 
 const urlInput = ref<string>('')
-const resolvedUid = ref<string | null>(null)
 
 const isValidUrl = computed<boolean>(() => extractBilibiliMid(urlInput.value) !== null)
 const isNonBilibiliHint = computed<boolean>(

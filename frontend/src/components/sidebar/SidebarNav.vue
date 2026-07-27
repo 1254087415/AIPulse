@@ -6,8 +6,6 @@
  * list, and emits `navigate` when an item is clicked. The container decides
  * how to react (router push, manual scroll, etc.).
  */
-import { computed } from 'vue'
-
 export interface SidebarNavItem {
   key: string
   label: string
@@ -31,10 +29,6 @@ const emit = defineEmits<{
 }>()
 
 const isActive = (item: SidebarNavItem): boolean => item.key === props.activeKey
-
-const activeIndex = computed(() =>
-  props.items.findIndex((item) => item.key === props.activeKey),
-)
 
 const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
   // Allow modifier-click to open in new tab — only intercept plain clicks.

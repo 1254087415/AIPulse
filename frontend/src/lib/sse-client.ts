@@ -14,12 +14,6 @@ export interface SseHandler<TPayload = unknown> {
   handler: (payload: TPayload) => void
 }
 
-interface MinimalEventSource {
-  addEventListener(name: string, cb: (ev: { data: string }) => void): void
-  removeEventListener(name: string, cb: (ev: { data: string }) => void): void
-  close(): void
-}
-
 /**
  * Open an SSE subscription to `url` and wire the given handlers to the
  * matching `event:` names.
@@ -36,8 +30,7 @@ export function subscribeSse<TPayload = unknown>(
   url: string,
   handlers: SseHandler<TPayload>[],
 ): () => void {
-  const EventSourceCtor = (globalThis as unknown as { EventSource?: typeof MinimalEventSource })
-    .EventSource
+  const EventSourceCtor = (globalThis as { EventSource?: typeof EventSource }).EventSource
   if (!EventSourceCtor) {
     // jsdom / server-side render — UI falls back to manual refresh or polling
     return () => {
