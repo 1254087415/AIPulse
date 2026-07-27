@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted, onUnmounted } from 'vue'
 import { getSettings, patchSettings, type SettingsResponse } from '../api/settings'
+import { setApiToken } from '../lib/settings-store'
 
 interface Settings {
   obsidian_vault_path: string
@@ -138,6 +139,9 @@ async function save() {
   try {
     const payload = buildPayload()
     const updated = await patchSettings(payload)
+    if (payload.aipulse_api_token) {
+      setApiToken(payload.aipulse_api_token)
+    }
     applySettings(updated)
     saved.value = true
     savedTimer = setTimeout(() => {

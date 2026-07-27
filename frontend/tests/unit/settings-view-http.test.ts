@@ -9,14 +9,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
-const { getSettingsMock, patchSettingsMock } = vi.hoisted(() => ({
+const { getSettingsMock, patchSettingsMock, setApiTokenMock } = vi.hoisted(() => ({
   getSettingsMock: vi.fn(),
   patchSettingsMock: vi.fn(),
+  setApiTokenMock: vi.fn(),
 }))
 
 vi.mock('../../src/api/settings', () => ({
   getSettings: () => getSettingsMock(),
   patchSettings: (...args: unknown[]) => patchSettingsMock(...args),
+}))
+
+vi.mock('../../src/lib/settings-store', () => ({
+  setApiToken: (token: string) => setApiTokenMock(token),
 }))
 
 import SettingsView from '../../src/views/SettingsView.vue'
@@ -63,6 +68,7 @@ describe('SettingsView (HTTP)', () => {
   beforeEach(() => {
     getSettingsMock.mockReset()
     patchSettingsMock.mockReset()
+    setApiTokenMock.mockReset()
     getSettingsMock.mockResolvedValue(groupedResponse)
     patchSettingsMock.mockResolvedValue(groupedResponse)
   })
@@ -112,6 +118,16 @@ describe('SettingsView (HTTP)', () => {
     const payload = patchSettingsMock.mock.calls[0][0] as Record<string, unknown>
     expect(payload.llm_api_key).toBe('sk-new-secret-value-1234')
 
+    wrapper.unmount()
+  })
+
+  it('stores a newly saved API token for subsequent authenticated requests', async () => {
+    const wrapper = await mountView()
+    await wrapper.find('[data-testid="panel-api-auth-header"]').trigger('click')
+    await wrapper.find('#aipulse-api-token').setValue('new-api-token')
+    await submitForm(wrapper)
+
+    expect(setApiTokenMock).toHaveBeenCalledWith('new-api-token')
     wrapper.unmount()
   })
 

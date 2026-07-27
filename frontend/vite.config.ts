@@ -23,5 +23,7 @@ export default defineConfig({
       },
     },
   },
-  envPrefix: ['VITE_', 'TAURI_'],
+  // Vite and the loopback FastAPI sidecar must read the same local API token.
+  envDir: '..',
+  envPrefix: ['VITE_', 'TAURI_', 'AIPULSE_API_TOKEN'],
 })
