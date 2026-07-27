@@ -1,0 +1,94 @@
+你是 v0.3 B 组 detached worker，验收 Phase 4 spec 04（summary-queue-api）。
+
+【必须遵守的硬约束】
+1. 只读 spec 04 + 当前实现 + 已有测试，**不许写新代码、不许改 src/aipulse/** 或 frontend/。
+2. **不许跑完整 pytest** —— 只跑以下三个文件：
+   - `tests/unit/summarizers/test_queue.py`（含 L6 终态 + SSE event name 契约）
+   - `tests/integration/test_summary_api.py`
+   - `tests/integration/test_summary_api_throttle.py`
+3. **不许 reset 真 DB**。用 `tmp_path` fixture + 默认 tmp SQLite 隔离。
+4. **不许改 .env 真 key / .env.example secrets / data/settings.json secrets**。
+5. **不许碰用户真 Apple Reminders 列表**。
+6. 你是 detached worker —— **回执直接 send 验收者 d8cfc17b-verifier-b04**（mcp__paseo__send_agent_prompt），不许 send 主会话。
+
+【B 组 spec 04 验收清单 7 项】
+
+#1 命名分歧映射：spec 写 `summarizers/agent/queue.py` + `api/summaries.py`；实际是 `summarizers/queue.py` + `api/summary.py`。
+   - 这是 L 组重构 R5-C 时把 Phase 3 runner 和 Phase 4 queue 拆开、并把单数命名换成更准的单数形式
+   - 关键契约（路径只是表面）是全的吗？需要 worker 确认核心契约都还在。
+
+#2 队列上限 20（Q124）：
+   - 文件 `src/aipulse/summarizers/queue.py:46` 应有 `QUEUE_MAX_SIZE = 20`
+   - `tests/unit/summarizers/test_queue.py` 含单元断言 `test_queue_unit_raises_queue_full_on_overflow`
+   - `tests/integration/test_summary_api_throttle.py::test_queue_max_size_constant_is_20` 断言 `QUEUE_MAX_SIZE == 20`
+   - `test_summary_api_throttle.py::test_enqueue_returns_429_when_queue_full` 验证 25 并发 → 20×202 + 4..5×429
+
+#3 并发 1 worker（Q124）：
+   - `src/aipulse/summarizers/queue.py:91` `asyncio.create_task(self._worker_loop(), name="aipulse-summary-worker")` —— 只 create 一次
+   - `test_start_and_stop_are_idempotent` 双启动不应重复 create task
+   - 串行性通过节流测试间接验证：worker 慢跑时 25 并发 → ≥20 必被 429 拒绝
+
+#4 SSE 三态推送（Q126）：
+   - 终态 event name = `task.{bvid}.{status}`（L1#3 硬契约，由 `finalize.py:93` 生成）
+   - `tests/unit/summarizers/test_queue.py::TestL1L6FinalizeContract::test_sse_event_name_is_task_dot_bvid_dot_failed_on_exception` + `_completed_on_success` + `_does_not_early_return_skipping_finalize` 必须 PASS
+   - 集成：`tests/integration/test_summary_api.py::test_sse_streams_started_then_completed` 必须 PASS，含 `.started` + `.completed` 两个事件
+   - heartbeat 15s（queue.py 中 SSE route 用 `asyncio.wait_for(sub_q.get(), timeout=15.0)` ）
+
+#5 队列满 → 429 + QueueFullError body：
+   - `src/aipulse/api/summary.py:128-138` 抛 HTTPException(429, detail={"error": "QUEUE_FULL", "message": "...", "size": N, "max_size": 20})
+   - `test_enqueue_returns_429_when_queue_full` 验证 429 body 含 `detail.error == "QUEUE_FULL"` + `max_size == 20`
+
+#6 Lifespan 启动 worker：
+   - `src/aipulse/server.py:99-106` 调 `summary_queue = get_queue(); await summary_queue.start()`
+   - shutdown 时 `await summary_queue.stop(); await reset_queue_for_tests()`
+
+#7 obsidian://open?path=... 协议：
+   - `frontend/src/components/buttons/SummarizeButton.vue:111` 必须有 `obsidian://open?path=${encodeURIComponent(notePath)}`
+
+#8 测试原则（Q142）：不 mock 真实 DB / FS / 真 sidecar。检查三个测试文件都符合这条原则（只有 `run_summary_pipeline` 可以 mock，因为烧 Kimi token）。
+
+【执行步骤】
+
+1. 先 `Read` 这三个文件确认它们存在且未改动：
+   - `src/aipulse/summarizers/queue.py`
+   - `src/aipulse/api/summary.py`
+   - `src/aipulse/server.py`
+2. 跑这三个 pytest（带 `-v`，输出全部 PASS/FAIL 细节 + 行号）：
+   ```
+   /opt/anaconda3/bin/pytest tests/unit/summarizers/test_queue.py tests/integration/test_summary_api.py tests/integration/test_summary_api_throttle.py -v 2>&1 | tee /tmp/b04-pytest-$(date +%s).log
+   ```
+3. 验证 obsidian 协议仍在前端代码中（`Read` SummarizeButton.vue:111 附近）。
+4. 总结：列出每项 #1-#8 的 GREEN/RED + 行号 + 测试命令输出 + pytest 末尾统计行。
+
+【回执格式（直接 send 验收者，**含事实证据**）】
+```
+B 组 spec 04 验收回执（worker → 验收者）— 北京时间 <现在>
+- #1 命名分歧映射 → <判断>
+- #2 队列上限 20 → GREEN/RED + file:line
+- #3 并发 1 worker → GREEN/RED + file:line
+- #4 SSE 三态 task.{bvid}.{status} → GREEN/RED + test name + line
+- #5 队列满 → 429 + QUEUE_FULL body → GREEN/RED
+- #6 Lifespan 启动 worker → GREEN/RED + server.py:99-106
+- #7 obsidian:// 协议 → GREEN/RED + SummarizeButton.vue:111
+- #8 测试原则（不 mock 真 sidecar/DB/FS）→ PASS/FAIL
+
+pytest 末行：<collected N / passed M / failed K>
+关键失败用例（如有）：<name + AssertionError + 行号>
+
+【不通过的项】 → 列出 + 必须修复的点（你不修复，只诊断）
+【硬红线（五大 I-类）】 → 列出本次是否触发
+  1. fail 不许标 completed ←？（看 finalize.py 是否 funnel）
+  2. 真链路不许 mock ←？（节流测试只 mock run_summary_pipeline 是允许的）
+  3. fixture 隔离真 DB ←？（三个测试都用 tmp SQLite，不需要碰真 data/）
+  4. 只操作 AIPulse测试 Reminders ←？（本次不涉及 Reminders）
+  5. UI 必须 mcp__playwright ←？（本次只改后端，不涉及）
+```
+
+【派工参数】
+- detached worker 名：B 组 spec 04 verifier-worker
+- model：claude-fable-5（按主会话指令）
+- mode：bypass
+- cwd：当前 /Users/zab/Documents/project/AIPulse
+- worktree：不需要（read-only 验收）
+
+【关键：你不需要写代码】你只跑测试 + Read 验证。回执落给验收者，验收者再做独立复验。

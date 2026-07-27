@@ -114,16 +114,28 @@ async def enqueue_summary_route(
             if up is not None:
                 up_name = up.display_name
 
-    from aipulse.summarizers.queue import get_queue
+    from aipulse.summarizers.queue import QueueFullError, get_queue
 
     queue = get_queue()
     await queue.start()
-    submission = await queue.enqueue(
-        repo,
-        video_id=video_id,
-        title=title or "",
-        up_name=up_name or "",
-    )
+    try:
+        submission = await queue.enqueue(
+            repo,
+            video_id=video_id,
+            title=title or "",
+            up_name=up_name or "",
+        )
+    except QueueFullError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "QUEUE_FULL",
+                "message": f"总结队列已满（{exc.size}/{exc.max_size}），请稍后重试",
+                "size": exc.size,
+                "max_size": exc.max_size,
+            },
+        ) from None
     if hotspot_id is not None:
         await repo.annotate(
             submission.job_id,
@@ -245,6 +257,57 @@ async def get_job_route(
     }
 
 
+@router.get("/events")
+async def summary_events_by_query_route(
+    request: Request,
+    bvid: str | None = None,
+    video_id: str | None = None,
+) -> Any:
+    """Stream SSE events for a single job identified by ``bvid`` / ``video_id``.
+
+    With no bvid/video_id, returns a heartbeat-only stream so the panel-level
+    ``subscribeSse('/api/summary/events', …)`` calls (FollowRecordsPanel,
+    FollowFailedPanel) don't 404 — they get an open connection and rely on
+    the manual refresh button for live updates.
+    """
+    target = bvid or video_id
+    if not target:
+        async def heartbeat_only():
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    await asyncio.sleep(15.0)
+                    yield {"event": "heartbeat", "data": "{}"}
+            finally:
+                pass
+
+        return EventSourceResponse(heartbeat_only())
+
+    from sqlalchemy import desc, select
+
+    from aipulse.models.summary_jobs import SummaryJob
+
+    from aipulse.store.database import get_session_maker
+
+    async with get_session_maker()() as session:
+        stmt = (
+            select(SummaryJob)
+            .where(SummaryJob.video_id == target)
+            .order_by(desc(SummaryJob.created_at))
+            .limit(1)
+        )
+        record = (await session.execute(stmt)).scalar_one_or_none()
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no summary job found for video_id={target}",
+            )
+        job_id = record.id
+
+    return await summary_events_route(job_id, request)
+
+
 @router.get("/events/{job_id}")
 async def summary_events_route(job_id: str, request: Request):
     """SSE stream of job progress events.
@@ -264,6 +327,10 @@ async def summary_events_route(job_id: str, request: Request):
     async def event_gen():
         # subscribe BEFORE pulling DB status to avoid race
         sub_q = queue.subscribe(job_id)
+        # Track whether we already emitted a started event so that we don't
+        # double-yield it when the snapshot replay collides with the worker's
+        # real ``broadcast("task.{bvid}.started")`` (race resolution).
+        emitted_started = False
         try:
             # emit current snapshot first (so clients that connect late
             # still see the latest state)
@@ -284,6 +351,17 @@ async def summary_events_route(job_id: str, request: Request):
                         "data": json.dumps(_serialize(record)),
                     }
                     return
+                # L1#3 (2026-07-26) — already-running job may have emitted
+                # ``task.{bvid}.started`` BEFORE this SSE handler subscribed
+                # (race: POST → worker fires immediately). Replay the started
+                # event so consumers that connect after POST still see it.
+                snapshot = _serialize(record)
+                snapshot["type"] = f"task.{record.video_id}.started"
+                yield {
+                    "event": snapshot["type"],
+                    "data": json.dumps(snapshot, default=str),
+                }
+                emitted_started = True
 
             while True:
                 if await request.is_disconnected():
@@ -295,11 +373,19 @@ async def summary_events_route(job_id: str, request: Request):
                     # heartbeat
                     yield {"event": "heartbeat", "data": "{}"}
                     continue
+                # Dedupe: skip the worker's real started broadcast if we
+                # already replayed one from the snapshot path above.
+                type_str = event.get("type") or ""
+                if type_str.endswith(".started") and emitted_started:
+                    continue
                 yield {
                     "event": event.get("type", "message"),
                     "data": json.dumps(event, default=str),
                 }
-                if event.get("type") in {"completed", "partial", "failed", "timeout"}:
+                # L1#3 (2026-07-26) — ``type`` 现在是 ``task.{bvid}.{status}``
+                # 形态（不只是裸 status 字符串）。抽出尾段决定 loop 是否退出。
+                terminal = type_str.rsplit(".", 1)[-1] if type_str else ""
+                if terminal in {"completed", "partial", "failed", "timeout"}:
                     break
             yield {"event": "closing", "data": "{}"}
         finally:

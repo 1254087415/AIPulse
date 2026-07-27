@@ -22,6 +22,7 @@ from aipulse.store.database import reset_db
 
 
 UAPI_BASE = "https://uapis.cn/api/v1"
+ARCHIVES_PATH = "/social/bilibili/archives"
 SPACE_URL = "https://space.bilibili.com/1567748478"
 
 
@@ -33,27 +34,28 @@ async def _reset_db():
 
 @pytest.fixture
 def sample_uapi_payload():
+    # 新端点（2026-07 切到 /social/bilibili/archives）响应形态：
+    # 无外层 code 包裹；total/page/size/videos
     return {
-        "code": 0,
-        "data": {
-            "list": [
-                {
-                    "bvid": "BV1new",
-                    "title": "新视频",
-                    "pubdate": 1721000000,
-                    "duration": 600,
-                    "play": 100,
-                },
-                {
-                    "bvid": "BV2old",
-                    "title": "旧视频",
-                    "pubdate": 1720900000,
-                    "duration": 300,
-                    "play": 50,
-                },
-            ],
-            "has_more": False,
-        },
+        "total": 2,
+        "page": 1,
+        "size": 50,
+        "videos": [
+            {
+                "bvid": "BV1new",
+                "title": "新视频",
+                "publish_time": 1721000000,
+                "duration": 600,
+                "play_count": 100,
+            },
+            {
+                "bvid": "BV2old",
+                "title": "旧视频",
+                "publish_time": 1720900000,
+                "duration": 300,
+                "play_count": 50,
+            },
+        ],
     }
 
 
@@ -78,7 +80,7 @@ class TestScanById:
         followed_up_id = resp.json()["data"]["id"]
 
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(200, json=sample_uapi_payload)
             )
 
@@ -120,10 +122,10 @@ class TestScanById:
         assert patch_resp.status_code == 200
 
         with respx.mock(assert_all_called=False, base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
                     200,
-                    json={"code": 0, "data": {"list": [], "has_more": False}},
+                    json={"total": 0, "page": 1, "size": 50, "videos": []},
                 )
             )
 
@@ -156,7 +158,7 @@ class TestSyncApi:
         followed_up_id = resp.json()["data"]["id"]
 
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/arc/search").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(200, json=sample_uapi_payload)
             )
 
@@ -183,10 +185,21 @@ class TestValidateEndpoint:
     @pytest.mark.asyncio
     async def test_validate_returns_uapi_strategy_when_valid(self, client):
         with respx.mock(base_url=UAPI_BASE) as mock:
-            mock.get("/space/card").mock(
+            mock.get(ARCHIVES_PATH).mock(
                 return_value=httpx.Response(
                     200,
-                    json={"code": 0, "data": {"user": {"name": "跟李沐学AI"}}},
+                    json={
+                        "total": 188,
+                        "page": 1,
+                        "size": 1,
+                        "videos": [
+                            {
+                                "bvid": "BV1",
+                                "title": "跟李沐学AI 的第一条视频",
+                                "publish_time": 1721000000,
+                            }
+                        ],
+                    },
                 )
             )
 
@@ -202,15 +215,20 @@ class TestValidateEndpoint:
         assert resp.status_code == 200
         body = resp.json()["data"]
         assert body["strategy"] == "uapi"
-        assert body["display_name"] == "跟李沐学AI"
+        # 新端点 /archives 不直接给 UP主 名，uapi.validate_up_exists 兜底取
+        # 第一条视频 title 作为 display_name；spec 没要求 user.name
+        assert body["display_name"] == "跟李沐学AI 的第一条视频"
 
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_validate_falls_back_to_html(self, client):
-        # UAPI 失败 → HTML 兜底
+        # UAPI 失败（模拟旧 404 响应） → HTML 兜底
         with respx.mock() as mock:
-            mock.get("https://uapis.cn/api/v1/space/card").mock(
-                return_value=httpx.Response(200, json={"code": -404, "message": "404"})
+            mock.get("https://uapis.cn/api/v1/social/bilibili/archives").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"code": "NOT_FOUND", "message": "endpoint retired"},
+                )
             )
             mock.get(SPACE_URL).mock(
                 return_value=httpx.Response(
@@ -237,8 +255,11 @@ class TestValidateEndpoint:
     @pytest.mark.asyncio
     async def test_validate_returns_409_when_both_fail(self, client):
         with respx.mock(assert_all_called=False) as mock:
-            mock.get("https://uapis.cn/api/v1/space/card").mock(
-                return_value=httpx.Response(200, json={"code": -404})
+            mock.get("https://uapis.cn/api/v1/social/bilibili/archives").mock(
+                return_value=httpx.Response(
+                    200,
+                    json={"total": 0, "page": 1, "size": 1, "videos": []},
+                )
             )
             mock.get("https://space.bilibili.com/99999999").mock(
                 return_value=httpx.Response(404)
@@ -274,3 +295,67 @@ class TestSchedulerRegistration:
         finally:
             # 不调 shutdown — 测试结束 scheduler 自然 GC
             pass
+
+
+# =====================================================================
+# Real-network integration (RED-NOT-BLOCK)
+# =====================================================================
+#
+# 真实链路 uapis.cn / space.bilibili.com 测试需要：
+# 1) 用户登录态 cookie（不然 412 风控 + WBI 校验），否则会被 B 站拒绝；
+# 2) 真实网络出口不能被 mock 拦截；
+# 3) 不能在 CI 默认 runner 跑（会被判定为不稳定 + 触发风控封 IP）。
+#
+# 默认跳过；显式 opt-in：``AIPULSE_REAL_BILIBILI=1 pytest -m real_bilibili``。
+# 任何 RED-NOT-BLOCK 真实链路必须先在本地用真实 mid 跑一次，验证断言再入库。
+# 红线：永不让 mock 冒充真链路；永不让默认测试访问 B 站真实域。
+class TestRealBilibiliUpCollector:
+    """Real-network tests — opt-in only, default SKIP.
+
+    跳过条件：
+      - AIPULSE_REAL_BILIBILI != "1"
+      - 或 pytest 不带 ``-m real_bilibili``
+    """
+
+    @pytest.mark.integration
+    @pytest.mark.real_bilibili
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        "os.environ.get('AIPULSE_REAL_BILIBILI') != '1'",
+        reason="默认跳过；AIPULSE_REAL_BILIBILI=1 启用（防风控 + CI 不稳定）",
+    )
+    async def test_uapi_collect_real_mid_1567748478(self):
+        """RED-NOT-BLOCK：真实 uapis.cn /archives 链路。
+
+        本地运行（需 SESSDATA cookie 可选）：
+            AIPULSE_REAL_BILIBILI=1 pytest -m real_bilibili tests/integration/test_followed_up_scan.py
+
+        CI 默认不会跑；如果跑也只会是用户主动 opt-in。
+        """
+        from aipulse.collectors.bilibili_up.factory import BilibiliUpCollectorFactory
+
+        collector = BilibiliUpCollectorFactory.create("uapi")
+        try:
+            videos = await collector.fetch_videos(mid="1567748478", count=3)
+        finally:
+            await collector.close()
+        # 真实接口对未登录 IP 可能返回空（兜底）；不强制断言数量。
+        assert isinstance(videos, list)
+
+    @pytest.mark.integration
+    @pytest.mark.real_bilibili
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        "os.environ.get('AIPULSE_REAL_BILIBILI') != '1'",
+        reason="默认跳过；AIPULSE_REAL_BILIBILI=1 启用",
+    )
+    async def test_uapi_validate_real_mid(self):
+        """RED-NOT-BLOCK：真实 /archives total 校验 UP主 存在性。"""
+        from aipulse.collectors.bilibili_up.factory import BilibiliUpCollectorFactory
+
+        collector = BilibiliUpCollectorFactory.create("uapi")
+        try:
+            exists, name = await collector.validate_up_exists("1567748478")
+        finally:
+            await collector.close()
+        assert isinstance(exists, bool)

@@ -65,8 +65,8 @@ export interface FollowedUpValidation {
 }
 
 export interface FollowedUpListResponse {
-  items: FollowedUp[]
-  total: number
+  success: boolean
+  data: FollowedUp[]
 }
 
 export interface FollowedUpSyncResponse {
@@ -97,45 +97,67 @@ export async function listFollowed(
     method: 'GET',
     ...(hasQuery ? { query } : {}),
   })
-  return response.items
+  return response.data
 }
 
 export async function createFollowed(payload: FollowedUpCreate): Promise<FollowedUp> {
-  return apiFetch<FollowedUp>('/api/followed-up', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+  // Phase 8 R2#4: defend against malformed payloads reaching the server.
+  // The Pydantic schema requires both `platform` and `uid` to be non-empty
+  // strings, but a stray follow-up form state (or a doubled submit before
+  // the disabled binding takes effect) used to fire a `{}` POST that the
+  // server then rejected with a noisy 422. Failing fast here keeps that
+  // 422 out of the console and turns it into a typed error the UI can
+  // surface in the form panel.
+  const platform = payload?.platform?.trim() ?? ''
+  const uid = payload?.uid?.trim() ?? ''
+  if (!platform || !uid) {
+    throw new Error('关注账号需要 platform + uid 两个字段')
+  }
+  const response = await apiFetch<{ success: boolean; data: FollowedUp }>(
+    '/api/followed-up',
+    {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, platform, uid }),
+    },
+  )
+  return response.data
 }
 
 export async function getFollowed(id: string): Promise<FollowedUp> {
-  return apiFetch<FollowedUp>(`/api/followed-up/${encodeURIComponent(id)}`, {
-    method: 'GET',
-  })
+  const response = await apiFetch<{ success: boolean; data: FollowedUp }>(
+    `/api/followed-up/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+  )
+  return response.data
 }
 
 export async function updateFollowed(id: string, payload: FollowedUpUpdate): Promise<FollowedUp> {
-  return apiFetch<FollowedUp>(`/api/followed-up/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  })
+  const response = await apiFetch<{ success: boolean; data: FollowedUp }>(
+    `/api/followed-up/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+  )
+  return response.data
 }
 
 export async function deleteFollowed(id: string): Promise<void> {
-  await apiFetch<{ ok: boolean }>(`/api/followed-up/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  })
+  await apiFetch<{ success: boolean; data: { id: string } }>(
+    `/api/followed-up/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function validateFollowed(payload: FollowedUpCreate): Promise<FollowedUpValidation> {
-  return apiFetch<FollowedUpValidation>('/api/followed-up/validate', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
+  const response = await apiFetch<{ success: boolean; data: FollowedUpValidation }>(
+    '/api/followed-up/validate',
+    { method: 'POST', body: JSON.stringify(payload) },
+  )
+  return response.data
 }
 
 export async function syncFollowed(id: string): Promise<FollowedUpSyncResponse> {
-  return apiFetch<FollowedUpSyncResponse>(
+  const response = await apiFetch<{ success: boolean; data: FollowedUpSyncResponse }>(
     `/api/followed-up/${encodeURIComponent(id)}/sync`,
     { method: 'POST' },
   )
+  return response.data
 }

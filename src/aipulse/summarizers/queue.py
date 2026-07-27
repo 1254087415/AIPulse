@@ -6,6 +6,13 @@
 
 约定：进程重启后内存中队列里的 job 重新查 DB（status=queued）即可恢复，
 因为 DB 已经是持久化真相。
+
+队列上限（spec §5.5）：maxsize=20。超出时 ``enqueue`` 抛
+:class:`QueueFullError`，由 HTTP 路由捕获转 429 + "queue full"。
+
+注意：maxsize 是 backpressure 闸门，并不能保证客户端"窗口"始终为 20。
+worker 在跑时 qsize 会短暂 < 20，但只要生产者 > 1 且新进 21..N 请求在 worker
+没消费前涌入，仍会被 ``asyncio.Queue.put_nowait`` 拒绝。
 """
 
 from __future__ import annotations
@@ -31,9 +38,21 @@ from aipulse.repositories.summary_job_repo import (
     SummaryJobRepository,
 )
 from aipulse.summarizers.agent.runner import run_summary_pipeline
+from aipulse.summarizers.finalize import finalize_summary_job
 from aipulse.store.database import get_session_maker
 
 logger = logging.getLogger(__name__)
+
+QUEUE_MAX_SIZE = 20
+
+
+class QueueFullError(Exception):
+    """enqueue 时队列已满（>= QUEUE_MAX_SIZE） → 上层转 HTTP 429。"""
+
+    def __init__(self, size: int, max_size: int = QUEUE_MAX_SIZE) -> None:
+        super().__init__(f"summary queue full ({size}/{max_size})")
+        self.size = size
+        self.max_size = max_size
 
 
 @dataclass
@@ -92,7 +111,7 @@ class SummaryJobQueue:
     async def _ensure_loop_state(self) -> None:
         """Lazily create asyncio primitives on first start."""
         if self._queue is None:
-            self._queue = asyncio.Queue()
+            self._queue = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
         if self._lock is None:
             self._lock = asyncio.Lock()
         if self._stop is None:
@@ -111,6 +130,9 @@ class SummaryJobQueue:
     ) -> JobSubmission:
         """Create a SummaryJob row, then enqueue a worker submission.
 
+        队列已满（>= QUEUE_MAX_SIZE）→ 抛 :class:`QueueFullError`，
+        上层应捕获转 HTTP 429。不阻塞等待（避免长时间挂住 HTTP 请求）。
+
         Returns the :class:`JobSubmission` so the caller can broadcast
         intermediate SSE events back to the HTTP layer.
         """
@@ -125,7 +147,13 @@ class SummaryJobQueue:
             up_name=up_name or "",
             extra_context=extra_context,
         )
-        await self._queue.put(submission)  # type: ignore[union-attr]
+        try:
+            self._queue.put_nowait(submission)  # type: ignore[union-attr]
+        except asyncio.QueueFull:
+            size = self._queue.qsize()  # type: ignore[union-attr]
+            # 不回滚 DB row：worker 空闲时会自然 drain queued records；
+            # 回滚代价（额外的 repo.delete 方法 + commit 协调）不值
+            raise QueueFullError(size=size, max_size=QUEUE_MAX_SIZE) from None
         return submission
 
     # ------------------------------------------------------------ consumer / SSE
@@ -169,14 +197,20 @@ class SummaryJobQueue:
                 logger.exception("Worker loop swallowed unexpected error")
 
     async def _run_submission(self, sub: JobSubmission) -> None:
-        """Run a single pipeline submission; emit SSE + update DB."""
+        """Run a single pipeline submission; emit SSE + update DB.
+
+        L6 业务侧终态分支（2026-07-26）：所有 3 个终态路径（success / timeout /
+        exception）都必须经过 :func:`finalize_summary_job` —— 业务结果完整性判定
+        优先于异常捕获（feedback_status-must-not-mask-failure 硬契约）。不允许
+        except 后 early return 跳过 finalize。
+        """
         async with get_session_maker()() as session:
             repo = SqlAlchemySummaryJobRepository(session)
             await repo.mark_started(sub.job_id)
             await self.broadcast(
                 sub.job_id,
                 {
-                    "type": "started",
+                    "type": f"task.{sub.video_id}.started",
                     "job_id": sub.job_id,
                     "video_id": sub.video_id,
                     "title": sub.title,
@@ -189,10 +223,21 @@ class SummaryJobQueue:
         settings = get_settings()
         timeout = float(getattr(settings, "summary_pipeline_timeout", 300.0))
 
-        # emit a per-step hook by patching tools is overkill — instead, we run
-        # the pipeline and emit only start/completed/failed events for now.
+        # The result fields consumed by finalize. Each branch (success /
+        # timeout / exception) populates whatever it has, then funnels through
+        # finalize_summary_job so the terminal status / SSE event name follow
+        # the L6 contract uniformly.
+        result: dict[str, Any] = {
+            "note_path": None,
+            "event_id": None,
+            "reminder_id": None,
+            "hotspot_id": None,
+            "intermediate_steps": [],
+            "error": None,
+        }
+
         try:
-            result = await asyncio.wait_for(
+            pipeline_result = await asyncio.wait_for(
                 run_summary_pipeline(
                     video_id=sub.video_id,
                     title=sub.title,
@@ -201,57 +246,54 @@ class SummaryJobQueue:
                 ),
                 timeout=timeout + 30.0,  # outer guard
             )
+            result.update(
+                {
+                    "note_path": pipeline_result.get("note_path"),
+                    "event_id": pipeline_result.get("event_id"),
+                    "reminder_id": pipeline_result.get("reminder_id"),
+                    "hotspot_id": pipeline_result.get("hotspot_id"),
+                    "intermediate_steps": pipeline_result.get(
+                        "intermediate_steps", []
+                    ),
+                    "error": pipeline_result.get("error"),
+                }
+            )
         except asyncio.TimeoutError:
-            async with get_session_maker()() as session:
-                repo = SqlAlchemySummaryJobRepository(session)
-                await repo.mark_finished(
-                    sub.job_id,
-                    JOB_STATUS_TIMEOUT,
-                    error=f"Pipeline outer timeout after {timeout + 30.0}s",
-                )
-                await session.commit()
-            await self.broadcast(
+            result["error"] = f"Pipeline outer timeout after {timeout + 30.0}s"
+            logger.error(
+                "summary pipeline timed out for job=%s video_id=%s after %.0fs",
                 sub.job_id,
-                {
-                    "type": "timeout",
-                    "job_id": sub.job_id,
-                    "error": f"超过 {timeout + 30.0}s 未完成",
-                },
+                sub.video_id,
+                timeout + 30.0,
             )
-            sub.event.set()
-            return
         except Exception as exc:  # noqa: BLE001
-            async with get_session_maker()() as session:
-                repo = SqlAlchemySummaryJobRepository(session)
-                await repo.mark_finished(
-                    sub.job_id, JOB_STATUS_FAILED, error=str(exc)
-                )
-                await session.commit()
-            await self.broadcast(
+            # Always log the full stack trace so post-mortem debugging does
+            # not depend on the UI / SSE consumer having surfaced the
+            # exception chain (workers may run unattended for hours).
+            logger.exception(
+                "summary pipeline raised for job=%s video_id=%s",
                 sub.job_id,
-                {
-                    "type": "failed",
-                    "job_id": sub.job_id,
-                    "error": str(exc),
-                },
+                sub.video_id,
             )
-            sub.event.set()
-            return
+            result["error"] = f"{type(exc).__name__}: {exc}"
 
-        status = result.get("status", "failed")
-        final = (
-            JOB_STATUS_COMPLETED
-            if status == "completed"
-            else JOB_STATUS_PARTIAL
-            if status == "partial"
-            else JOB_STATUS_FAILED
+        # Finalize: ONE funnel for all three terminal branches. Even the
+        # timeout / exception paths must go through this so we never
+        # accidentally mark a job "completed" when the business-side fields
+        # are missing.
+        finalized = finalize_summary_job(
+            video_id=sub.video_id,
+            hotspot_id=result.get("hotspot_id"),
+            note_path=result.get("note_path"),
+            error=result.get("error"),
         )
+
         async with get_session_maker()() as session:
             repo = SqlAlchemySummaryJobRepository(session)
             await repo.mark_finished(
                 sub.job_id,
-                final,
-                error=result.get("error"),
+                finalized.status,
+                error=finalized.error,
                 note_path=result.get("note_path"),
                 event_id=result.get("event_id"),
                 reminder_id=result.get("reminder_id"),
@@ -259,19 +301,27 @@ class SummaryJobQueue:
             )
             await session.commit()
 
-        await self.broadcast(
+        # SSE payload — event name comes from finalize, payload carries the
+        # full job state so the frontend can render completion / failure
+        # states uniformly. L1#3 (2026-07-26): the ``type`` field on the
+        # broadcast payload is the canonical ``task.{bvid}.{status}`` event
+        # name so the SSE route's ``event.get("type")`` forwards it directly
+        # to the wire ``event:`` line.
+        sse_payload = finalized.sse_payload(
             sub.job_id,
-            {
-                "type": final,
-                "job_id": sub.job_id,
-                "status": status,
-                "note_path": result.get("note_path"),
-                "event_id": result.get("event_id"),
-                "reminder_id": result.get("reminder_id"),
-                "error": result.get("error"),
-                "intermediate_steps": result.get("intermediate_steps", []),
-            },
+            video_id=sub.video_id,
+            note_path=result.get("note_path"),
+            event_id=result.get("event_id"),
+            reminder_id=result.get("reminder_id"),
+            hotspot_id=result.get("hotspot_id"),
+            intermediate_steps=result.get("intermediate_steps", []),
         )
+        # Override the type with the canonical task.{bvid}.{status} event
+        # name so the SSE ``event:`` line in summary_events_route matches the
+        # spec contract. Frontend can subscribe on either ``task.*`` or the
+        # legacy ``completed|partial|failed|timeout`` names.
+        sse_payload["type"] = finalized.event_name
+        await self.broadcast(sub.job_id, sse_payload)
         sub.event.set()
 
 

@@ -21,6 +21,7 @@ async def sync_source_by_id(source_id: str) -> int:
         if source is None:
             logger.warning("Source %s not found for sync", source_id)
             return 0
+        source_name = source.name
         collector = None
         try:
             collector_cls = get_collector(source.source_type)
@@ -34,13 +35,16 @@ async def sync_source_by_id(source_id: str) -> int:
             await session.commit()
         except Exception as exc:  # noqa: BLE001
             await session.rollback()
-            logger.exception("Failed to sync source %s (%s)", source.id, source.name)
-            source.last_error = sanitize_error_message(str(exc))
-            source.failed_at = datetime.now(UTC)
-            try:
-                await session.commit()
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to persist source error for %s", source.id)
+            logger.exception("Failed to sync source %s (%s)", source_id, source_name)
+            # refresh source before persisting error (rollback expired attributes)
+            source = await session.get(Source, source_id)
+            if source is not None:
+                source.last_error = sanitize_error_message(str(exc))
+                source.failed_at = datetime.now(UTC)
+                try:
+                    await session.commit()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Failed to persist source error for %s", source_id)
         finally:
             if collector is not None:
                 await collector.close()
@@ -57,6 +61,8 @@ async def sync_all_sources() -> int:
             .all()
         )
         for source in sources:
+            source_id = source.id
+            source_name = source.name
             collector = None
             try:
                 collector_cls = get_collector(source.source_type)
@@ -69,11 +75,13 @@ async def sync_all_sources() -> int:
                     await collector.close()
             except Exception as exc:  # noqa: BLE001
                 await session.rollback()
-                logger.exception("Failed to sync source %s (%s)", source.id, source.name)
-                source.last_error = sanitize_error_message(str(exc))
-                source.failed_at = datetime.now(UTC)
-                try:
-                    await session.commit()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Failed to persist source error for %s", source.id)
+                logger.exception("Failed to sync source %s (%s)", source_id, source_name)
+                refreshed = await session.get(Source, source_id)
+                if refreshed is not None:
+                    refreshed.last_error = sanitize_error_message(str(exc))
+                    refreshed.failed_at = datetime.now(UTC)
+                    try:
+                        await session.commit()
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Failed to persist source error for %s", source_id)
     return processed

@@ -8,8 +8,13 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aipulse.hotspot.models import Hotspot
+from aipulse.models.followed_up_collections import FollowedUpCollection
+from aipulse.models.learning_events import LearningEvent
+from aipulse.models.summary_jobs import SummaryJob
 from aipulse.repositories.followed_up_repo import (
     DuplicateFollowedUpError,
     FollowedUpNotFoundError,
@@ -63,16 +68,52 @@ async def create_followed_up_route(
 ) -> dict[str, Any]:
     """Create a new FollowedUp entry.
 
-    If the caller omits ``display_name``, the B站 card API is consulted
-    to fill it in. Network failures fall back to ``uid``.
+    If the caller omits ``display_name`` for a bilibili entry, the B站
+    card API is consulted to fill it in. Network failures fall back to
+    ``uid``. ``profile_url`` is also defaulted when missing — bilibili
+    entries use the canonical space.bilibili.com URL; non-bilibili
+    entries must provide it explicitly.
     """
     repo = SqlAlchemyFollowedUpRepository(session)
 
+    # spec 09 TC-API-FOLLOWED-UP-04: 超过 20 个 UP 主上限 → 422
+    existing_count = await repo.count_active()
+    MAX_FOLLOW_LIMIT = 20
+    if existing_count >= MAX_FOLLOW_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "success": False,
+                "error": "FOLLOW_LIMIT_EXCEEDED",
+                "message": (
+                    f"已达 UP 主上限 {MAX_FOLLOW_LIMIT} 个；"
+                    "删除部分 UP 主后再添加。"
+                ),
+                "max_size": MAX_FOLLOW_LIMIT,
+                "current_count": existing_count,
+            },
+        )
+
     display_name = payload.display_name
-    if not display_name and payload.platform == "bilibili":
-        display_name, profile_url = await _resolve_bilibili_display_name(payload.uid)
-    else:
-        profile_url = payload.profile_url
+    profile_url = payload.profile_url
+
+    if payload.platform == "bilibili":
+        if not display_name or not profile_url:
+            resolved_name, resolved_profile = await _resolve_bilibili_display_name(payload.uid)
+            display_name = display_name or resolved_name
+            profile_url = profile_url or resolved_profile
+    elif not profile_url:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "success": False,
+                "error": "profile_url required",
+                "message": (
+                    f"platform={payload.platform} requires an explicit profile_url; "
+                    "v0.3 only supports bilibili auto-derive."
+                ),
+            },
+        )
 
     try:
         record = await repo.create(
@@ -312,21 +353,49 @@ async def get_followed_up_overview_route(
     followed_up_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Phase 7 v0.3 spec §G8 — UP主详情页数据汇总。
+    """Phase 7 v0.3 spec §G8 — UP主详情页数据汇总（按 db id）。
 
     聚合：基础信息 + health + 最近的 10 个 job + 最近的 10 个 learning event
     + 最近 10 个 collection。前端 single-page 渲染。
     """
-    from sqlalchemy import desc, select
-
-    from aipulse.models.followed_up_collections import FollowedUpCollection
-    from aipulse.models.learning_events import LearningEvent
-    from aipulse.models.summary_jobs import SummaryJob
-
     followed_repo = SqlAlchemyFollowedUpRepository(session)
     record = await followed_repo.find_by_id(followed_up_id)
     if record is None or record.deleted_at is not None:
         raise HTTPException(status_code=404, detail="FollowedUp not found")
+    return await _build_overview_response(record, session)
+
+
+@router.get("/by-uid/{platform}/{uid}/overview")
+async def get_followed_up_overview_by_uid_route(
+    platform: str,
+    uid: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Phase 8 R2#2 alias — same payload, addressed by (platform, uid).
+
+    The dashboard lists FollowedUps by their platform uid (B站 mid etc.)
+    rather than their database UUID. Accepting that key directly keeps the
+    URL contract human-friendly without forcing the frontend to look up the
+    id first.
+    """
+    repo = SqlAlchemyFollowedUpRepository(session)
+    record = await repo.get_by_platform_uid(platform, uid)
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    return await _build_overview_response(record, session)
+
+
+async def _build_overview_response(
+    record: Any,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    """Assemble the GET /overview payload for a given FollowedUp record.
+
+    Shared by both the db-id endpoint (`/{followed_up_id}/overview`) and the
+    uid-alias endpoint (`/by-uid/{platform}/{uid}/overview`) so a row
+    identifies identically regardless of how the caller addresses it.
+    """
+    followed_up_id = record.id
 
     health = {
         "health": record.health,
@@ -339,7 +408,6 @@ async def get_followed_up_overview_route(
     }
 
     # Hotspots → job 关联（hotspot.followed_up_id == followed_up_id）
-    from aipulse.hotspot.models import Hotspot
 
     stmt_jobs = (
         select(SummaryJob)

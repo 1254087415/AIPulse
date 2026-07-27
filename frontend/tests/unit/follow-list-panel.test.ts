@@ -228,13 +228,12 @@ describe('AddFollowForm', () => {
     wrapper.unmount()
   })
 
-  it('emits a submit event with platform+uid when uid is filled', async () => {
+  it('emits a submit event with platform+uid when a valid B站 URL is pasted', async () => {
     const wrapper = mount(AddFollowForm, {
       props: { submitting: false },
     })
 
-    await wrapper.find('[data-testid="uid-input"]').setValue('1567748478')
-    await wrapper.find('[data-testid="platform-select"]').setValue('bilibili')
+    await wrapper.find('[data-testid="url-input"]').setValue('https://space.bilibili.com/1567748478')
     await wrapper.find('form').trigger('submit')
 
     expect(wrapper.emitted('submit')).toBeTruthy()

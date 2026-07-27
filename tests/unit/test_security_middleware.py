@@ -6,7 +6,7 @@ import pytest
 from pydantic import SecretStr
 from starlette.requests import Request
 
-from aipulse.core.config import get_settings
+from aipulse.core.config import AppSettings, get_settings
 from aipulse.web.security_middleware import verify_auth_header
 
 
@@ -99,35 +99,40 @@ def test_verify_auth_header_rejects_legacy_x_token_header(
 
 
 @pytest.mark.unit
-def test_settings_kimi_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    """AppSettings exposes kimi_* defaults and learning_notification_enabled."""
+def test_settings_llm_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AppSettings exposes llm_* defaults and learning_notification_enabled."""
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.delenv("KIMI_API_KEY", raising=False)
     monkeypatch.delenv("KIMI_BASE_URL", raising=False)
     monkeypatch.delenv("KIMI_MODEL", raising=False)
     monkeypatch.delenv("LEARNING_NOTIFICATION_ENABLED", raising=False)
     get_settings.cache_clear()
 
-    settings = get_settings()
-    # Defaults aligned with v0.3 spec §5.3 (kimi-for-coding + Kimi coding endpoint).
-    assert settings.kimi_base_url == "https://api.kimi.com/coding/v1"
-    assert settings.kimi_model == "kimi-for-coding"
+    # Construct with _env_file=None to bypass .env defaults so we observe
+    # the model's true defaults.
+    settings = AppSettings(_env_file=None)  # type: ignore[call-arg]
+    # Defaults aligned with v0.4 minimax switch.
+    assert settings.llm_base_url == "https://api.minimaxi.com/v1"
+    assert settings.llm_model == "MiniMax-M2.5"
     assert settings.learning_notification_enabled is True
     # SecretStr default is empty
-    assert settings.kimi_api_key.get_secret_value() == ""
+    assert settings.llm_api_key.get_secret_value() == ""
 
 
 @pytest.mark.unit
-def test_settings_kimi_overrides_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Env vars override the kimi defaults."""
-    monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-fake")
-    monkeypatch.setenv("KIMI_BASE_URL", "https://kimi.example.com/v1")
-    monkeypatch.setenv("KIMI_MODEL", "kimi-custom")
+def test_settings_llm_overrides_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Env vars override the llm defaults."""
+    monkeypatch.setenv("LLM_API_KEY", "sk-llm-fake")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.com/v1")
+    monkeypatch.setenv("LLM_MODEL", "custom-model")
     monkeypatch.setenv("LEARNING_NOTIFICATION_ENABLED", "false")
     get_settings.cache_clear()
 
     settings = get_settings()
-    assert settings.kimi_api_key.get_secret_value() == "sk-kimi-fake"
-    assert settings.kimi_base_url == "https://kimi.example.com/v1"
-    assert settings.kimi_model == "kimi-custom"
+    assert settings.llm_api_key.get_secret_value() == "sk-llm-fake"
+    assert settings.llm_base_url == "https://example.com/v1"
+    assert settings.llm_model == "custom-model"
     assert settings.learning_notification_enabled is False
 

@@ -1,0 +1,102 @@
+你是 v0.3 detached worker（spec 06 实现 / 修复），由 Paseo UI 可见的 `paseo run -d` CLI 创建（model=claude-fable-5, mode=bypassPermissions）。
+
+## 上下文
+
+主会话（B 组验收者派单）正在验收 `docs/superpowers/specs/v0.3-followed-up-and-summary/06-notification-failure.md` + `docs/superpowers/plans/v0.3-followed-up-and-summary/06-phase6-archive.md`。
+
+B 组已结案：spec 01-05 = GREEN（DB 模型 / B 站采集 / langchain-agent / summary-queue-api / frontend-ui 170 测试 PASS）。
+
+完整验收清单在 `docs/superpowers/verifications/2026-07-26-spec06-verifier-checklist.md`（主会话验收者写的）。
+
+## 你的任务
+
+修复 spec 06 plan + 当前实现的 6 个 RED 候选：
+
+### RED #1 — archive API 未调三方向存储
+- 文件：`src/aipulse/web/routes.py:133` `archive_hotspot_route`
+- 当前：调 `hotspot/service.archive_hotspot` 单方向 Obsidian
+- 改为：调 `src/aipulse/archive/service.py:93` `archive_three_way()`，返回四件 `note_path / learning_event_id / reminder_id / obsidian_task_written`
+- Bearer 鉴权 + 校验 hotspot 存在
+- 新增 `tests/integration/test_hotspot_archive_api.py`（plan §Task 3 要求）
+
+### RED #2 — notify API 端点未实现
+- 新增 `POST /api/hotspots/{id}/notify` 端点（`src/aipulse/web/routes.py`）
+- 三重 gate：`learning_notification_enabled=true` + `notified=false`（hotspot 或 summary_job 状态）+ `worth_learning`（hotspot/judge 结果）
+- 调 `PushStrategyRegistry` 发送（plan §Task 4 要求；如需 import 路径，确认 `src/aipulse/pushers/registry.py` API）
+- 触发后置 `notified=true`（持久化到 hotspot 表或 summary_jobs.reminder_id）
+- Bearer 鉴权
+- 测试：`tests/integration/test_notify_api.py` 或加到 existing 路径
+
+### RED #3 — Apple Reminders topic→list 映射未实现
+- 文件：`src/aipulse/apple/reminders.py`
+- 加 `pick_list_for_topic(topic: str) -> str` 函数（topic 关键字匹配 3 业务列表）：
+  - `工作学习` / `学习` / `AI` / `技术` / `编程` / `面试` → `工作学习`
+  - `搞钱` / `副业` / `创业` / `变现` → `搞钱！！！`
+  - 其他 → `琐碎生活`
+- `create_reminder` 默认 `list_name` 改为 `pick_list_for_topic(title)`
+- **关键 I 类红线**：测试仍硬隔离 `list_name="AIPulse测试"`（不许碰真业务列表）
+- 测试加：`tests/unit/apple/test_reminders.py::test_pick_list_for_topic_*` 4 个 case（每个 list_name 1 个 + 默认 1 个）
+- 测试不许真调 osascript
+
+### RED #4 — `estimated_minutes = max(15, video_duration × 2)` 未实现
+- 文件：`src/aipulse/summarizers/agent/tools.py:614-666` `create_learning_event`
+- 当前：`estimated_minutes=15` 硬编码（line 654）
+- 改为：读 `video_duration`（来自 `fetch_transcript` 中间结果或 summary_jobs 表），计算 `max(15, duration_minutes × 2)` 写入
+- 如果 `video_duration` 不可得，fallback 到 15（保留当前行为）
+- 测试：`tests/unit/summarizers/test_agent_tools_extended.py` 加 `test_create_learning_event_estimated_minutes_*`
+
+### RED #5 — scheduled_at 默认 20:00 当天 vs now+24h
+- 文件：`src/aipulse/summarizers/agent/tools.py:747-749` `default_scheduled_at`
+- 当前：`(datetime.now(UTC) + timedelta(hours=24)).isoformat()`
+- 改为：`today 20:00 Asia/Shanghai`，格式 ISO8601（带 timezone +08:00）
+- 如已过 20:00，返回 tomorrow 20:00
+- 测试：`tests/unit/summarizers/test_agent_tools_extended.py` 加 `test_default_scheduled_at_today_20_00_*`
+
+### RED #6 — `tests/unit/archive/test_service.py::test_append_obsidian_task_writes_markdown_line` 失败
+- 失败原因：测试断言 `create_reminder.assert_awaited_once_with(title=, due_date=, notes=)` 不带 list_name，但 `tools.send_notification:710` 加 `list_name='AIPulse测试'` 后调用方也带 list_name
+- 修复：测试断言改为接受 `list_name='AIPulse测试'`（用 `assert_awaited_once_with(..., list_name='AIPulse测试')` 或 `assert_any_call(..., list_name='AIPulse测试')`）
+
+## I 类硬红线（违反 = 你 GREEN 不能结）
+
+1. **fail 不许标 completed** — 任何业务 fail 状态保持原样
+2. **真链路不许 mock** — integration test 跑真 sidecar
+3. **fixture 隔离真 DB** — 测试用 tmp_path + 隔离 SQLite
+4. **测试只操作 `AIPulse测试` Reminders 列表** — 不许改测试 list_name 到 `工作学习` / `搞钱！！！` / `琐碎生活`
+5. **UI 改动必须 mcp__playwright 真实浏览器**（本任务无 UI 改动，不适用）
+
+## 硬约束
+
+1. **不许碰真 DB** — `data/aipulse.db` 等
+2. **不许改 .env 真 key / .env.example secrets / data/settings.json secrets**
+3. **不许跑完整 pytest 套件** — 只跑相关 tests：
+   ```bash
+   python -m pytest tests/unit/archive/ tests/unit/apple/ tests/unit/test_archive_service_extended.py tests/unit/test_clean_reminders.py tests/integration/test_summary_three_way_persistence.py --no-cov -v
+   ```
+4. **不许碰用户真 Apple Reminders 列表** — 测试一律 `list_name="AIPulse测试"`
+5. **不许 send 主会话** — 完成后只能 send 主会话回执（mcp__paseo__send_agent_prompt target=主会话回执 session，**禁止** send 主会话其他 agent）
+
+## 工作流程
+
+1. 读 `docs/superpowers/verifications/2026-07-26-spec06-verifier-checklist.md` 完整清单
+2. 读 plan `docs/superpowers/plans/v0.3-followed-up-and-summary/06-phase6-archive.md` 6 tasks
+3. 按 RED #1→#6 顺序实现；每改一个跑相关 tests 验证
+4. 全部完成 → 写 "## 完成报告" 段（事实证据 + file:line + 测试输出）
+5. send 验收者回执（agent ID 见会话上下文 — 但请**用 send_agent_prompt** 而非其他途径）
+
+## 跑测试
+
+不要并行跑 pytest；串行跑单文件：
+- `python -m pytest tests/unit/archive/test_service.py --no-cov -v`（6 个 test）
+- `python -m pytest tests/unit/apple/test_reminders.py --no-cov -v`（8 个 test）
+- `python -m pytest tests/unit/test_archive_service_extended.py --no-cov -v`（14 个 test）
+- `python -m pytest tests/unit/test_clean_reminders.py --no-cov -v`（8 个 test）
+- `python -m pytest tests/integration/test_summary_three_way_persistence.py --no-cov -v`（3 个 test）
+
+跨文件合跑会因 test ordering 触发 test_append_obsidian_task_writes_markdown_line 失败（RED #6）。
+
+## 完成
+
+- ✅ 全部 6 RED 已修
+- ✅ 相关 tests 全 PASS
+- ✅ 写 "## 完成报告"：每条 RED 修了什么（file:line）+ 测试结果
+- ✅ send 主会话验收者回执

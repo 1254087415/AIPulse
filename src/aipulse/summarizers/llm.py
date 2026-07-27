@@ -9,12 +9,12 @@ from aipulse.core.config import AppSettings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://api.kimi.com/coding/v1"
-DEFAULT_MODEL = "kimi-for-coding"
+DEFAULT_BASE_URL = "https://api.minimaxi.com/v1"
+DEFAULT_MODEL = "MiniMax-M2.5"
 
 
 class OpenAICompatibleAdapter:
-    """Adapter for OpenAI-compatible APIs such as Kimi and OpenRouter."""
+    """Adapter for OpenAI-compatible APIs such as MiniMax (via minimaxi.com) and OpenRouter."""
 
     def __init__(
         self,
@@ -24,8 +24,8 @@ class OpenAICompatibleAdapter:
         client: AsyncOpenAI | None = None,
     ) -> None:
         self.settings = settings or AppSettings()
-        self.base_url = base_url or self.settings.llm_base_url or DEFAULT_BASE_URL
-        self.model = model or self.settings.llm_model or DEFAULT_MODEL
+        self.base_url = base_url or self.settings.llm_base_url
+        self.model = model or self.settings.llm_model
         if client is not None:
             self.client = client
         else:
@@ -49,7 +49,7 @@ class OpenAICompatibleAdapter:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=1.0,  # Kimi kimi-for-coding only supports 1.0
+                temperature=1.0,
             )
         except RateLimitError as exc:
             logger.exception("LLM rate limit exceeded")

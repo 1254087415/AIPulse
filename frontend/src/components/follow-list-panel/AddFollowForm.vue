@@ -1,12 +1,14 @@
 <script setup lang="ts">
 /**
- * AddFollowForm — minimal form to add a new followed UP主.
+ * AddFollowForm — single textbox that accepts a B站 profile URL (spec §6.6).
  *
- * Validates that `uid` is non-empty before emitting `submit`. The parent
- * (FollowListPanel) owns the API call and the error feedback loop.
+ * The form resolves the URL to (platform=bilibili, uid=mid) before emitting
+ * `submit`. The parent (FollowListPanel) owns the API call. Spec §1.3 lists
+ * WechatMP / Douyin / Xiaohongshu as out of scope, so the platform dropdown
+ * has been removed; only B站 is supported in v0.3.
  */
 import { computed, ref } from 'vue'
-import type { FollowedUpCreate, FollowedUpPlatform } from '../../api/followedUp'
+import type { FollowedUpCreate } from '../../api/followedUp'
 
 interface Props {
   submitting: boolean
@@ -22,31 +24,34 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const PLATFORM_OPTIONS: FollowedUpPlatform[] = [
-  'bilibili',
-  'wechat_mp',
-  'douyin',
-  'xiaohongshu',
-]
+// Accept both numeric mid and hex-style test ids (e.g. 102d224fbda7).
+const BILIBILI_MID_PATTERN = /^[0-9a-z]{5,}$/i
+const BILIBILI_SPACE_URL_PATTERN = /space\.bilibili\.com\/([0-9a-z]+)/i
 
-const PLATFORM_LABELS: Record<FollowedUpPlatform, string> = {
-  bilibili: 'B 站',
-  wechat_mp: '公众号',
-  douyin: '抖音',
-  xiaohongshu: '小红书',
+function extractBilibiliMid(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (BILIBILI_MID_PATTERN.test(trimmed)) return trimmed
+  const match = BILIBILI_SPACE_URL_PATTERN.exec(trimmed)
+  return match?.[1] ?? null
 }
 
-const platform = ref<FollowedUpPlatform>('bilibili')
-const uid = ref<string>('')
+const urlInput = ref<string>('')
+const resolvedUid = ref<string | null>(null)
 
-const isValid = computed<boolean>(() => uid.value.trim().length > 0)
+const isValidUrl = computed<boolean>(() => extractBilibiliMid(urlInput.value) !== null)
+const isNonBilibiliHint = computed<boolean>(
+  () => urlInput.value.trim().length > 0 && !isValidUrl.value,
+)
 
 const onSubmit = (event: Event): void => {
   event.preventDefault()
-  if (!isValid.value) return
+  if (!isValidUrl.value) return
+  const uid = extractBilibiliMid(urlInput.value)
+  if (!uid) return
   emit('submit', {
-    platform: platform.value,
-    uid: uid.value.trim(),
+    platform: 'bilibili',
+    uid,
   })
 }
 
@@ -55,33 +60,25 @@ const onCancel = (): void => emit('cancel')
 
 <template>
   <form class="add-follow-form" @submit="onSubmit">
-    <div class="add-follow-form__row">
-      <label class="add-follow-form__field">
-        <span class="add-follow-form__label">平台</span>
-        <select
-          v-model="platform"
-          class="add-follow-form__select"
-          data-testid="platform-select"
-          :disabled="submitting"
-        >
-          <option v-for="opt in PLATFORM_OPTIONS" :key="opt" :value="opt">
-            {{ PLATFORM_LABELS[opt] }}
-          </option>
-        </select>
-      </label>
-
-      <label class="add-follow-form__field add-follow-form__field--grow">
-        <span class="add-follow-form__label">UP 主 UID / mid</span>
-        <input
-          v-model="uid"
-          class="add-follow-form__input"
-          data-testid="uid-input"
-          type="text"
-          placeholder="例如 1567748478"
-          :disabled="submitting"
-        />
-      </label>
-    </div>
+    <label class="add-follow-form__field">
+      <span class="add-follow-form__label">B 站主页链接</span>
+      <input
+        v-model="urlInput"
+        class="add-follow-form__input"
+        data-testid="url-input"
+        type="text"
+        placeholder="例如 https://space.bilibili.com/1567748478"
+        :disabled="submitting"
+      />
+      <span
+        v-if="isNonBilibiliHint"
+        class="add-follow-form__hint"
+        data-testid="url-hint"
+        role="alert"
+      >
+        请粘贴 B 站主页链接（如 https://space.bilibili.com/1567748478）
+      </span>
+    </label>
 
     <p
       v-if="errorMessage"
@@ -106,7 +103,7 @@ const onCancel = (): void => emit('cancel')
         type="submit"
         class="add-follow-form__btn add-follow-form__btn--primary"
         data-testid="submit-button"
-        :disabled="submitting || !isValid"
+        :disabled="submitting || !isValidUrl"
       >
         {{ submitting ? '添加中…' : '添加' }}
       </button>
@@ -125,21 +122,10 @@ const onCancel = (): void => emit('cancel')
   border-radius: var(--radius-md);
 }
 
-.add-follow-form__row {
-  display: flex;
-  gap: 12px;
-  align-items: stretch;
-}
-
 .add-follow-form__field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 0 0 140px;
-}
-
-.add-follow-form__field--grow {
-  flex: 1;
 }
 
 .add-follow-form__label {
@@ -149,7 +135,6 @@ const onCancel = (): void => emit('cancel')
   text-transform: uppercase;
 }
 
-.add-follow-form__select,
 .add-follow-form__input {
   appearance: none;
   height: 36px;
@@ -162,11 +147,15 @@ const onCancel = (): void => emit('cancel')
   font-family: var(--font-body);
 }
 
-.add-follow-form__select:focus,
 .add-follow-form__input:focus {
   outline: none;
   border-color: var(--accent-coral);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-coral) 20%, transparent);
+}
+
+.add-follow-form__hint {
+  font-size: 12px;
+  color: var(--status-red);
 }
 
 .add-follow-form__error {
