@@ -177,6 +177,10 @@ data/
 .claude/
 docs/_build/
 
+# Screenshots: 已 tracked PNG (spec05-* 等) 保留追踪; 未来新 PNG 默认忽略,
+# 需要时显式 `git add -f docs/.screenshots/<file>.png`
+docs/.screenshots/*.png
+
 # Environment variable variants
 .env.*
 .env.local
