@@ -61,6 +61,31 @@ async def _resolve_bilibili_display_name(uid: str) -> tuple[str, str]:
     return name, profile_url
 
 
+async def _resolve_bilibili_avatar(uid: str) -> str | None:
+    """Return the B站 user avatar URL via the public card API.
+
+    Best-effort lookup — any network/parse error returns ``None`` and the
+    caller can fall back to a placeholder. The result is intentionally not
+    cached at this layer; callers may persist it via the ``config`` JSON.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=_BILIBILI_VALIDATE_TIMEOUT) as client:
+            response = await client.get(
+                _BILIBILI_CARD_URL,
+                params={"mid": uid},
+                headers={"User-Agent": "AIPulse/0.3"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Bilibili avatar lookup failed for mid=%s: %s", uid, exc)
+        return None
+
+    data = payload.get("data") or {}
+    card = data.get("card") or {}
+    return card.get("face") or None
+
+
 @router.post("", status_code=201)
 async def create_followed_up_route(
     payload: FollowedUpCreate,
@@ -576,5 +601,242 @@ async def _build_overview_response(
             "recent_jobs": recent_jobs,
             "recent_learning_events": recent_events,
             "recent_collections": recent_collections,
+        },
+    }
+
+
+# ------------------------------------------------------------------
+# spec §6.12 FollowDetailView — full detail + paginated videos
+# ------------------------------------------------------------------
+
+
+async def _build_detail_response(
+    record: Any,
+    session: AsyncSession,
+) -> dict[str, Any]:
+    """Assemble the GET /detail payload for a given FollowedUp record.
+
+    Differs from ``_build_overview_response``:
+    - ``name`` (not ``display_name``) for the spec §6.12 contract
+    - ``health`` is the flat string ("healthy"/"warning"/"error")
+    - ``enabled`` mirrors ``is_active`` so the UI can render 暂停/恢复
+    - ``avatar`` is resolved from B站's card API (cached in ``config``)
+    - ``collections[]`` carries a ``videos`` sublist so the
+      ``<CollectionAccordion>`` can expand in place
+    """
+    config = dict(record.config or {})
+    avatar = config.get("avatar_url")
+    if not avatar and record.platform == "bilibili":
+        avatar = await _resolve_bilibili_avatar(record.uid)
+        if avatar:
+            config["avatar_url"] = avatar
+            # Persist lazily so the next request avoids a network call.
+            try:
+                from aipulse.repositories.followed_up_repo import (
+                    SqlAlchemyFollowedUpRepository,
+                )
+                SqlAlchemyFollowedUpRepository(session).update(
+                    record.id, config=config
+                )
+                await session.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("avatar cache write skipped: %s", exc)
+
+    stmt_cols = (
+        select(FollowedUpCollection)
+        .where(FollowedUpCollection.followed_up_id == record.id)
+        .order_by(desc(FollowedUpCollection.created_at))
+    )
+    collections = (await session.execute(stmt_cols)).scalars().all()
+
+    stmt_videos = (
+        select(Hotspot)
+        .where(
+            Hotspot.followed_up_id == record.id,
+            Hotspot.deleted_at.is_(None) if hasattr(Hotspot, "deleted_at") else True,
+        )
+        .order_by(desc(Hotspot.created_at))
+        .limit(500)
+    )
+    videos = (await session.execute(stmt_videos)).scalars().all()
+    videos_by_collection: dict[str | None, list[dict[str, Any]]] = {}
+    for v in videos:
+        item = {
+            "bvid": v.content_id,
+            "title": v.title,
+            "status": v.decision_status,
+            "hotspot_id": v.id,
+        }
+        videos_by_collection.setdefault(v.followed_up_collection_id, []).append(item)
+
+    collections_payload: list[dict[str, Any]] = []
+    for c in collections:
+        collections_payload.append(
+            {
+                "id": c.id,
+                "title": c.title,
+                "description": c.description,
+                "video_count": c.video_count,
+                "videos": videos_by_collection.get(c.id, []),
+            }
+        )
+    # Surface videos that have no collection under the (None) bucket
+    orphan_videos = videos_by_collection.get(None, [])
+
+    await session.commit()
+    return {
+        "success": True,
+        "data": {
+            "id": record.id,
+            "name": record.display_name,
+            "mid": record.uid,
+            "url": record.profile_url,
+            "avatar": avatar or "",
+            "health": record.health,
+            "enabled": record.is_active,
+            "strategy": record.collector_strategy,
+            "interval_minutes": record.fetch_interval_minutes,
+            "last_checked_at": record.last_checked_at.isoformat()
+            if record.last_checked_at
+            else None,
+            "last_error": record.last_error,
+            "collections": collections_payload,
+            "orphan_videos": orphan_videos,
+        },
+    }
+
+
+@router.get("/{followed_up_id}/detail")
+async def get_followed_up_detail_route(
+    followed_up_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Phase 7 v0.3 spec §6.12 — UP主详情页 spec-shaped payload.
+
+    Addressed by either the row's database UUID or, when the caller supplies a
+    platform uid that 404s the canonical path, falls through to the uid-alias
+    lookup. Either way the response shape matches the spec exactly.
+    """
+    repo = SqlAlchemyFollowedUpRepository(session)
+    try:
+        record = await _find_followed_up(session, followed_up_id)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        record = await repo.get_by_platform_uid("bilibili", followed_up_id)
+        if record is None or record.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="FollowedUp not found")
+    return await _build_detail_response(record, session)
+
+
+@router.get("/by-uid/{platform}/{uid}/detail")
+async def get_followed_up_detail_by_uid_route(
+    platform: str,
+    uid: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Phase 7 v0.3 spec §6.12 — UP主详情页，uid-alias 入口。"""
+    repo = SqlAlchemyFollowedUpRepository(session)
+    record = await repo.get_by_platform_uid(platform, uid)
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    return await _build_detail_response(record, session)
+
+
+@router.get("/{followed_up_id}/videos")
+async def list_followed_up_videos_route(
+    followed_up_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    collection_id: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """Phase 7 v0.3 spec §6.12 — UP主 视频分页 (Round 7 Q1).
+
+    Returns ``{ items, nextOffset }``. ``nextOffset`` is ``null`` when the
+    page is the last one. ``collection_id`` filters to a single collection;
+    omit it to receive all videos.
+    """
+    record = await _find_followed_up(session, followed_up_id)
+
+    stmt = select(Hotspot).where(
+        Hotspot.followed_up_id == record.id,
+    )
+    if collection_id is not None:
+        if collection_id == "":
+            stmt = stmt.where(Hotspot.followed_up_collection_id.is_(None))
+        else:
+            stmt = stmt.where(Hotspot.followed_up_collection_id == collection_id)
+    stmt = stmt.order_by(desc(Hotspot.created_at))
+
+    # Fetch `limit + 1` rows so we can derive nextOffset without a count(*)
+    rows = (await session.execute(stmt.offset(offset).limit(limit + 1))).scalars().all()
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    items: list[dict[str, Any]] = [
+        {
+            "bvid": v.content_id,
+            "title": v.title,
+            "collection_id": v.followed_up_collection_id,
+            "status": v.decision_status,
+            "published_at": v.published_at.isoformat() if v.published_at else None,
+            "hotspot_id": v.id,
+        }
+        for v in page_rows
+    ]
+    next_offset: int | None = offset + limit if has_more else None
+
+    await session.commit()
+    return {
+        "success": True,
+        "data": {
+            "items": items,
+            "nextOffset": next_offset,
+        },
+    }
+
+
+@router.get("/by-uid/{platform}/{uid}/videos")
+async def list_followed_up_videos_by_uid_route(
+    platform: str,
+    uid: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    collection_id: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """Phase 7 v0.3 spec §6.12 — UP主 视频分页 uid-alias 入口。"""
+    repo = SqlAlchemyFollowedUpRepository(session)
+    record = await repo.get_by_platform_uid(platform, uid)
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    stmt = select(Hotspot).where(Hotspot.followed_up_id == record.id)
+    if collection_id is not None:
+        if collection_id == "":
+            stmt = stmt.where(Hotspot.followed_up_collection_id.is_(None))
+        else:
+            stmt = stmt.where(Hotspot.followed_up_collection_id == collection_id)
+    stmt = stmt.order_by(desc(Hotspot.created_at))
+    rows = (await session.execute(stmt.offset(offset).limit(limit + 1))).scalars().all()
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
+    items = [
+        {
+            "bvid": v.content_id,
+            "title": v.title,
+            "collection_id": v.followed_up_collection_id,
+            "status": v.decision_status,
+            "published_at": v.published_at.isoformat() if v.published_at else None,
+            "hotspot_id": v.id,
+        }
+        for v in page_rows
+    ]
+    next_offset = offset + limit if has_more else None
+    await session.commit()
+    return {
+        "success": True,
+        "data": {
+            "items": items,
+            "nextOffset": next_offset,
         },
     }

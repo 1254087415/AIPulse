@@ -2,19 +2,19 @@
 /**
  * CollectionAccordion — single 合集 row used by FollowDetailView.
  *
- * Native `<details>/<summary>` keeps the markup accessible by default and
- * avoids a 3rd-party accordion dep. The opened branch shows description
- * + video count placeholder (real video list arrives when the
- * `CollectionVideoList` view is wired in a later milestone).
+ * Native <details>/<summary> keeps the markup accessible by default and
+ * avoids a 3rd-party accordion dep. When the row is opened the body shows
+ * a list of videos (or a placeholder when the collection is empty).
  */
 import { computed } from 'vue'
+import VideoListItem, { type VideoListItemVideo } from './VideoListItem.vue'
 
 export interface CollectionItem {
   id: string
   title: string
   description?: string | null
   video_count: number
-  created_at?: string
+  videos?: VideoListItemVideo[]
 }
 
 interface Props {
@@ -23,9 +23,13 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const summary = computed(
-  () => `${props.collection.video_count} 视频`,
-)
+const emit = defineEmits<{
+  (e: 'open-bilibili', bvid: string): void
+}>()
+
+const summary = computed(() => `${props.collection.video_count} 视频`)
+
+const videos = computed(() => props.collection.videos ?? [])
 </script>
 
 <template>
@@ -41,6 +45,15 @@ const summary = computed(
       >
         {{ collection.description }}
       </p>
+      <ul v-if="videos.length > 0" class="collection-row__videos">
+        <VideoListItem
+          v-for="v in videos"
+          :key="v.bvid"
+          :video="v"
+          @open-bilibili="(bvid: string) => emit('open-bilibili', bvid)"
+        />
+      </ul>
+      <p v-else class="collection-row__empty">该合集暂无视频</p>
     </details>
   </div>
 </template>
@@ -82,5 +95,21 @@ const summary = computed(
   color: var(--text-secondary, #6b6b6b);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.collection-row__videos {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collection-row__empty {
+  margin: 0;
+  padding: 0 14px 14px;
+  font-size: 12px;
+  color: var(--text-secondary, #6b6b6b);
 }
 </style>
