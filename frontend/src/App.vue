@@ -1,16 +1,27 @@
 <script setup lang="ts">
+/**
+ * App.vue — top-level shell selector (spec §6.14 / §8.1).
+ *
+ * Two layouts are supported:
+ *   1. New v0.3 shell — Sidebar (left) + main content (right). Used by every
+ *      v0.3 surface: dashboard, sources, keywords, jobs, digests, settings,
+ *      followed-up detail, hotspot detail. Also used as the safe default for
+ *      any future routes that haven't been enumerated yet.
+ *   2. Legacy Tauri header — used by the two legacy Tauri-only windows
+ *      (/input and /tasks). These rely on `@tauri-apps/api/core` and cannot
+ *      render under the browser; they keep the old banner.
+ */
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import Sidebar from './components/sidebar/Sidebar.vue'
 
+const LEGACY_PATHS: readonly string[] = ['/input', '/tasks']
+
 const route = useRoute()
 
-// The new v0.3 dashboard uses a two-column layout (sidebar + content).
-// Legacy input / settings / tasks windows keep the old header layout.
 const usesNewShell = computed<boolean>(() => {
-  const path = route.path
-  return path === '/dashboard' || path.startsWith('/dashboard/')
+  return !LEGACY_PATHS.includes(route.path)
 })
 </script>
 

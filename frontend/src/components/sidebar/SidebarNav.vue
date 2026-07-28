@@ -6,8 +6,6 @@
  * list, and emits `navigate` when an item is clicked. The container decides
  * how to react (router push, manual scroll, etc.).
  */
-import { computed } from 'vue'
-
 export interface SidebarNavItem {
   key: string
   label: string
@@ -31,10 +29,6 @@ const emit = defineEmits<{
 }>()
 
 const isActive = (item: SidebarNavItem): boolean => item.key === props.activeKey
-
-const activeIndex = computed(() =>
-  props.items.findIndex((item) => item.key === props.activeKey),
-)
 
 const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
   // Allow modifier-click to open in new tab — only intercept plain clicks.
@@ -66,11 +60,6 @@ const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
         </a>
       </li>
     </ul>
-    <span
-      v-if="activeIndex >= 0"
-      class="app-sidebar__active-marker"
-      aria-hidden="true"
-    />
   </nav>
 </template>
 
@@ -105,37 +94,29 @@ const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
   font-size: var(--sidebar-text-size);
   font-weight: var(--sidebar-text-weight);
   text-decoration: none;
-  transition:
-    background-color var(--sidebar-transition),
-    color var(--sidebar-transition);
+  /* spec §6.8 + 09 §8.4 L1489: active-state swap must be instant;
+     only :hover adds the 150ms ease-out transition. */
+  transition: none;
   position: relative;
+  border-left: 3px solid transparent;
 }
 
 .app-sidebar__item:hover {
   background: var(--sidebar-hover-bg);
   color: var(--text-primary);
+  transition: background-color var(--sidebar-transition);
 }
 
 .app-sidebar__item:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sidebar-active-bar-color) 30%, transparent);
+  box-shadow: inset 0 0 0 2px rgba(var(--signal-rgb), 0.30);
 }
 
 .app-sidebar__item--active {
   color: var(--sidebar-active-text-color);
   background: var(--sidebar-active-bg);
   font-weight: 500;
-}
-
-.app-sidebar__item-wrap.is-active::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 4px;
-  bottom: 4px;
-  width: var(--sidebar-active-bar-width);
-  background: var(--sidebar-active-bar-color);
-  border-radius: 0 2px 2px 0;
+  border-left: 3px solid var(--sidebar-active-bar-color);
 }
 
 .app-sidebar__icon {
@@ -147,9 +128,5 @@ const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
 .app-sidebar__label {
   flex: 1;
   line-height: 1;
-}
-
-.app-sidebar__active-marker {
-  display: none;
 }
 </style>

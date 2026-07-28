@@ -2,8 +2,9 @@
 /**
  * Sidebar — 200px fixed navigation rail for the dashboard.
  *
- * Layout responsibilities:
- *  - Render the four-section nav (首页 / 关注 / 即将学习 / 失败)
+ * Layout responsibilities (spec §6.9):
+ *  - Render the six top-level sections: AI 热点 / 来源 / 关键词 / 定时任务
+ *    / 摘要 / 系统
  *  - Highlight the active item via the route
  *  - Offer a collapse toggle that shrinks the rail to an icon-only column
  *
@@ -31,11 +32,15 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 
+// Spec §6.9 — six-entry nav rail. Follow-up tabs (关注列表 / 处理记录 /
+// 即将学习 / 失败) live inside DashboardView, not here.
 const NAV_ITEMS: SidebarNavItem[] = [
-  { key: 'dashboard', label: '首页', to: '/dashboard', icon: '◐' },
-  { key: 'followed', label: '关注', to: '/followed', icon: '★' },
-  { key: 'upcoming', label: '即将学习', to: '/upcoming', icon: '◷' },
-  { key: 'failed', label: '失败', to: '/failed', icon: '!' },
+  { key: 'hotspot', label: 'AI 热点', to: '/dashboard', icon: '◐' },
+  { key: 'sources', label: '来源', to: '/sources', icon: '⚙' },
+  { key: 'keywords', label: '关键词', to: '/keywords', icon: '✎' },
+  { key: 'jobs', label: '定时任务', to: '/jobs', icon: '⏱' },
+  { key: 'digests', label: '摘要', to: '/digests', icon: '✦' },
+  { key: 'settings', label: '系统', to: '/settings', icon: '☰' },
 ]
 
 const activeKey = computed<string>(() => {
@@ -47,7 +52,8 @@ const activeKey = computed<string>(() => {
       return item.key
     }
   }
-  return NAV_ITEMS[0].key
+  // Fallback: stay on the dashboard entry (which is the root landing).
+  return 'hotspot'
 })
 
 // Local mirror of the collapsed prop so the toggle updates immediately even

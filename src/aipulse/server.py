@@ -24,6 +24,7 @@ from aipulse.core.config import get_settings
 from aipulse.hotspot.models import Source
 from aipulse.scheduler.client import get_scheduler
 from aipulse.scheduler.jobs.digest_generate import generate_daily_digest
+from aipulse.scheduler.jobs.followed_up_scan import register_followed_up_jobs
 from aipulse.scheduler.jobs.hotspot_sync import sync_all_sources
 from aipulse.scheduler.jobs.vault_scan import scan_obsidian_vault_job
 from aipulse.scheduler.webui import register_scheduler_listeners
@@ -91,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         id="vault_scan",
         replace_existing=True,
     )
+    register_followed_up_jobs(scheduler)
     register_scheduler_listeners()
     scheduler.start()
     # Phase 4 — start in-process summary job queue worker

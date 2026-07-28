@@ -50,6 +50,12 @@ describe('TasksView', () => {
     vi.clearAllMocks()
     resetListeners()
     vi.mocked(invoke).mockResolvedValue({ tasks: [] })
+    // Phase 8 R2#3: pretend we're running under the Tauri webview so the
+    // view exercises its `invoke()` / `listen()` path instead of the new
+    // browser fallback branch. The companion test file
+    // `tasks-view-tauri-environment.test.ts` exercises the missing-runtime
+    // branch by deleting this same flag in its own beforeEach.
+    ;(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {}
   })
 
   it('calls list_tasks with limit 50 on mount', async () => {

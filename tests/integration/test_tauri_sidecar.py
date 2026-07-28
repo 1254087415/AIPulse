@@ -100,8 +100,8 @@ def test_get_settings_returns_defaults(sidecar: subprocess.Popen[str]) -> None:
     result = response["result"]
     assert "llm_base_url" in result
     assert "llm_model" in result
-    assert result["llm_base_url"] == "https://api.kimi.com/coding/v1"
-    assert result["llm_model"] == "kimi-for-coding"
+    assert result["llm_base_url"] == "https://api.minimaxi.com/v1"
+    assert result["llm_model"] == "MiniMax-M2.5"
 
 
 @pytest.mark.integration

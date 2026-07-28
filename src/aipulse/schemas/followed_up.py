@@ -15,6 +15,14 @@ ProfileUrlStr = Annotated[str, Field(min_length=1, max_length=256)]
 CollectorStrategyStr = Annotated[str, Field(pattern=r"^(uapi|html)$")]
 StatusStr = Annotated[str, Field(pattern=r"^(active|paused|auth_failed)$")]
 HealthStr = Annotated[str, Field(pattern=r"^(healthy|warning|error)$")]
+# Phase 8 A5 FIX: spec §3.0 / I7 — Hotspot.decision_status is one of exactly
+# five values. The DB stores it as a 16-char varchar; this schema-level
+# regex is the boundary check so collectors and scheduler jobs fail fast on
+# typos instead of silently writing garbage.
+DecisionStatusStr = Annotated[
+    str,
+    Field(pattern=r"^(pending|worth_learning|worth_notified|skipped|failed)$"),
+]
 
 
 class FollowedUpBase(BaseModel):
@@ -33,9 +41,10 @@ class FollowedUpBase(BaseModel):
 class FollowedUpCreate(BaseModel):
     """Input schema for POST /api/followed-up.
 
-    Note: ``display_name`` is optional — the API layer will resolve it from
-    the source platform (B站) when omitted. ``profile_url`` is required so
-    the backend can build a canonical URL when the platform lookup fails.
+    Spec §6.6: callers paste a B站 profile URL and the backend derives
+    ``platform``, ``uid``, ``display_name`` and ``profile_url``. Only
+    ``platform`` and ``uid`` are mandatory; the rest are filled in by the
+    API layer (see ``create_followed_up_route``).
     """
 
     model_config = ConfigDict(from_attributes=True, frozen=True)
@@ -43,15 +52,17 @@ class FollowedUpCreate(BaseModel):
     platform: PlatformStr
     uid: UidStr
     display_name: DisplayNameStr | None = None
-    profile_url: ProfileUrlStr
+    profile_url: str | None = Field(default=None, max_length=256)
     collector_strategy: CollectorStrategyStr = "uapi"
     fetch_interval_minutes: int = Field(default=30, ge=1, le=10080)
     config: dict[str, Any] | None = None
 
     @field_validator("profile_url")
     @classmethod
-    def validate_profile_url(cls, v: str) -> str:
-        """Require an http(s) URL."""
+    def validate_profile_url(cls, v: str | None) -> str | None:
+        """Require an http(s) URL when the caller supplies one."""
+        if v is None:
+            return v
         if not v.startswith(("http://", "https://")):
             raise ValueError("profile_url must start with http:// or https://")
         return v

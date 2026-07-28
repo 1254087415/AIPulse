@@ -10,8 +10,53 @@ import asyncio
 import logging
 import re
 import uuid
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# spec 06 §7.2：业务列表按 topic 关键字分类选单。
+# 测试走 AIPulse测试 列表（feedback_tests-must-isolate-apple-reminders 硬约束）；
+# 这里只覆盖生产路径的默认映射。
+_TOPIC_TO_LIST: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "工作学习",
+        (
+            "工作学习",
+            "学习",
+            "AI",
+            "技术",
+            "编程",
+            "面试",
+        ),
+    ),
+    (
+        "搞钱！！！",
+        (
+            "搞钱",
+            "副业",
+            "创业",
+            "变现",
+        ),
+    ),
+)
+_DEFAULT_LIST = "琐碎生活"
+
+
+def pick_list_for_topic(topic: str) -> str:
+    """按 topic 关键字匹配 spec 06 §7.2 的 3 业务列表。
+
+    匹配优先级：``工作学习`` > ``搞钱！！！`` > 默认 ``琐碎生活``。
+    ``topic`` 是 None / 空 → 返回默认 ``琐碎生活``。
+    """
+    if not topic:
+        return _DEFAULT_LIST
+    haystack = topic.lower()
+    for list_name, keywords in _TOPIC_TO_LIST:
+        for kw in keywords:
+            if kw.lower() in haystack:
+                return list_name
+    return _DEFAULT_LIST
 
 
 async def create_reminder(
@@ -19,7 +64,7 @@ async def create_reminder(
     due_date: str,
     notes: str = "",
     *,
-    list_name: str = "工作学习",
+    list_name: Optional[str] = None,
     executor_timeout_s: float = 5.0,
 ) -> str:
     """Create an Apple Reminders entry; return the Reminder's ID.
@@ -29,7 +74,8 @@ async def create_reminder(
         due_date: ISO8601 时间字符串（Apple Reminders 期望 YYYY-MM-DD HH:MM:SS 或
             YYYY-MM-DD 形式）。
         notes: Reminder 备注（≤ 5000 字符）。
-        list_name: 目标 Reminders 列表名（若不存在则创建空列表）。
+        list_name: 目标 Reminders 列表名（None → 按 topic 走 ``pick_list_for_topic``
+            默认 3 业务列表；显式传入时覆盖）。
         executor_timeout_s: 调 osascript 的超时。
 
     Returns:
@@ -48,7 +94,9 @@ async def create_reminder(
     safe_notes = notes.strip()[:5000]
     # 把 ISO8601 拆成 macOS 友好的 YYYY-MM-DD HH:MM:SS；若无时间则纯日期
     pretty_due = _format_due_date(due_date)
-    list_esc = _escape_for_applescript(list_name)
+    # spec 06 §7.2：list_name 未显式传入 → 按 topic 走 pick_list_for_topic 默认映射。
+    effective_list = list_name if list_name else pick_list_for_topic(safe_title)
+    list_esc = _escape_for_applescript(effective_list)
     title_esc = _escape_for_applescript(safe_title)
     notes_esc = _escape_for_applescript(safe_notes)
     due_esc = _escape_for_applescript(pretty_due)

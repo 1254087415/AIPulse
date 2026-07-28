@@ -72,7 +72,12 @@ async def test_enqueue_returns_202_with_job_id(client, db_session, _isolate_queu
     resp2 = await client.get(f"/api/summary/job/{job_id}", headers=_bearer())
     assert resp2.status_code == 200, resp2.text
     data = resp2.json()["data"]
-    assert data["status"] == JOB_STATUS_COMPLETED
+    # L6 (2026-07-26) 业务侧终态契约：hotspot_id 缺 + note_path 在 →
+    # finalize 强制 partial（之前会标 completed 是 bug）。
+    from aipulse.models.summary_jobs import JOB_STATUS_PARTIAL
+
+    assert data["status"] == JOB_STATUS_PARTIAL
+    assert "hotspot_id" in (data.get("error") or "")
     assert data["note_path"] == "/tmp/note.md"
 
 
@@ -113,6 +118,28 @@ async def test_get_job_returns_404_for_unknown_id(client) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_sse_not_found_returns_error_event_for_query_and_job_path(client) -> None:
+    missing_id = "missing-sse-job"
+
+    query_response = await client.get(
+        "/api/summary/events",
+        params={"bvid": missing_id},
+        headers=_bearer(),
+    )
+    path_response = await client.get(
+        f"/api/summary/events/{missing_id}",
+        headers=_bearer(),
+    )
+
+    for response in (query_response, path_response):
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "event: error" in response.text
+        assert '"error": "not_found"' in response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_list_jobs_returns_recent(client, db_session, _isolate_queue_and_pipeline) -> None:
     for vid in ("BVa", "BVb", "BVc"):
         r = await client.post(f"/api/summary/{vid}", headers=_bearer())
@@ -133,6 +160,7 @@ async def test_sse_streams_started_then_completed(client, db_session, _isolate_q
     payload["note_path"] = "/tmp/sse-note.md"
     payload["event_id"] = "evtSSE"
     payload["reminder_id"] = "remSSE"
+    payload["hotspot_id"] = "hs-SSE"  # L6 业务侧终态契约：补齐 hotspot_id → completed
     # 给 fake_run 0.3s hang 才有 SSE started/completed 两个事件
     sleep_fake = _fake_run_factory(payload, sleep_s=0.3)
     with patch.object(queue_mod, "run_summary_pipeline", new=sleep_fake):
@@ -162,7 +190,7 @@ async def test_sse_streams_started_then_completed(client, db_session, _isolate_q
                         except json.JSONDecodeError:
                             continue
                         events.append({"event": ev_type, "data": pl})
-                        if pl.get("type") == "completed":
+                        if (pl.get("type") or "").endswith(".completed"):
                             complete.set()
                             return
 
@@ -170,8 +198,10 @@ async def test_sse_streams_started_then_completed(client, db_session, _isolate_q
         await asyncio.wait_for(complete.wait(), timeout=5.0)
         await consume_task
 
-        assert any(e["data"].get("type") == "started" for e in events)
+        assert any(
+            (e["data"].get("type") or "").endswith(".started") for e in events
+        )
         completed_event = next(
-            e for e in events if e["data"].get("type") == "completed"
+            e for e in events if (e["data"].get("type") or "").endswith(".completed")
         )
         assert completed_event["data"]["note_path"] == "/tmp/sse-note.md"

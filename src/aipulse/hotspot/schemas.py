@@ -1,6 +1,6 @@
 """Pydantic schemas for hotspot API responses and requests."""
 
-from datetime import date, datetime
+from datetime import date as _date, datetime
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -85,9 +85,15 @@ class DailyDigestOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    date: date
+    date: _date
     title: str
     content: str
     top_hotspot_ids: list[Any] | None
     generated_at: datetime
     pushed_at: datetime | None
+
+
+class GenerateDigestRequest(BaseModel):
+    """Optional body for POST /api/digests/generate."""
+
+    target_date: _date | None = None

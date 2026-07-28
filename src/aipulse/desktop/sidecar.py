@@ -428,3 +428,15 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+def cli() -> None:
+    """Console-script entry point — wraps the async main() in asyncio.run().
+
+    The ``[project.scripts] aipulse-sidecar = "aipulse.desktop.sidecar:main"``
+    entry point would otherwise hand a coroutine object back to setuptools,
+    triggering ``RuntimeWarning: coroutine 'main' was never awaited`` and
+    exiting immediately without ever reading stdin. Use this wrapper from
+    the console-script entry point.
+    """
+    asyncio.run(main())

@@ -162,10 +162,24 @@ logs/
 data/raw/
 data/processed/
 data/downloads/
+# Local cache for summary intermediates (transcripts fetched from B 站,
+# kept on disk so summarize() can read the file path instead of stuffing
+# the full text into a ReAct Action Input — see R5-C 2026-07-26)
+data/cache/
+# Local settings.json may carry secrets (kimi_api_key etc.) — never tracked
+data/settings.json
+# Whole data/ dir is local-only (SQLite + transcripts cache + downloads +
+# scripts + secrets-bearing settings). Sub-files above also ignored
+# individually; this top-level entry suppresses "?? data/" in git status.
+data/
 
 # Local Claude/ECC configuration and drafts
 .claude/
-docs/
+docs/_build/
+
+# Screenshots: 已 tracked PNG (spec05-* 等) 保留追踪; 未来新 PNG 默认忽略,
+# 需要时显式 `git add -f docs/.screenshots/<file>.png`
+docs/.screenshots/*.png
 
 # Environment variable variants
 .env.*
