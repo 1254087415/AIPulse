@@ -378,13 +378,17 @@ async def sync_followed_up_route(
 ) -> dict[str, Any]:
     """Phase 2 v0.3 spec §4.10 — 触发单个 UP主立即同步。
 
+    v0.3 round 6 升级：sync 现在一次性触发「数据收集 + agent 摘要 +
+    三向归档」三件事 —— 新 hotspot 在 upsert 后立即由
+    ``enqueue_summaries_for_hotspots`` 入 summary 队列，summary worker
+    后台跑 6 个 @tool 落 DB / Obsidian / Apple Reminder。
     行为：调 ``scan_followed_up_by_id()``；15 秒超时；超时返回 202 + job id。
     失败返回 404 (UP主不存在) / 502 (上游失败)。
     """
     from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
 
     try:
-        new_count = await asyncio.wait_for(
+        outcome = await asyncio.wait_for(
             scan_followed_up_by_id(followed_up_id),
             timeout=15.0,
         )
@@ -407,7 +411,11 @@ async def sync_followed_up_route(
         "data": {
             "followed_up_id": followed_up_id,
             "status": "ok",
-            "new_videos": new_count,
+            "new_videos": outcome.new_hotspots,
+            # v0.3 round 6: sync 现在也入队 summary job；前端可据此轮询
+            # /api/summary/jobs 看 agent pipeline 进度。
+            "enqueued_summaries": outcome.enqueued_summaries,
+            "new_bvids": list(outcome.new_bvids),
         },
     }
 
