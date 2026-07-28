@@ -1,5 +1,7 @@
 """Web API routes for hotspots and keywords."""
 
+import logging
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -8,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aipulse.hotspot.schemas import (
     DailyDigestOut,
+    GenerateDigestRequest,
     HotspotOut,
     KeywordCreate,
     KeywordOut,
@@ -15,9 +18,7 @@ from aipulse.hotspot.schemas import (
     SourceOut,
     SourceUpdate,
 )
-from aipulse.hotspot.service import (
-    archive_hotspot as archive_hotspot_service,
-)
+from aipulse.archive.service import archive_three_way
 from aipulse.hotspot.service import (
     create_keyword as create_keyword_service,
 )
@@ -54,11 +55,26 @@ from aipulse.hotspot.service import (
 from aipulse.hotspot.service import (
     update_source as update_source_service,
 )
+from aipulse.core.config import get_settings as get_global_settings
+from aipulse.core.config import reset_settings as reset_global_settings
 from aipulse.store.database import get_session
 from aipulse.store.models import now_utc
+from aipulse.web.schemas import SettingsResponse, SettingsUpdate
 from aipulse.web.sse import sse_manager
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
+
+
+# Spec E3: well-known macOS / iCloud / Nutstore vault locations. The UI
+# shows these as suggestions before the user falls back to a manual picker.
+DEFAULT_VAULT_CANDIDATES: tuple[str, ...] = (
+    "~/Documents",
+    "~/Library/Mobile Documents/iCloud~md~obsidian/Documents",
+    "~/Nutstore Files",
+    "~/坚果云",
+)
 
 
 @router.get("/hotspots")
@@ -120,14 +136,138 @@ async def archive_hotspot_route(
     hotspot_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Archive a hotspot to Obsidian."""
-    try:
-        paths = await archive_hotspot_service(session, hotspot_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if paths is None:
+    """Archive a hotspot via the v0.3 three-way pipeline (DB + Obsidian Tasks + Apple Reminders).
+
+    spec 06 §7.2：触发 DB learning_events + Obsidian note + Obsidian Task checkbox +
+    Apple Reminder 三方向独立 try/except。Bearer 鉴权由 server 中间件统一处理
+    （aipulse_api_token 未配置时跳过）。
+
+    Returns:
+        ``{note_path, learning_event_id, reminder_id, obsidian_task_written, errors}``。
+    """
+    from aipulse.hotspot.models import Hotspot
+    from aipulse.models.followed_up import FollowedUp
+    from aipulse.summarizers.agent import tools as agent_tools
+
+    hotspot = await session.get(Hotspot, hotspot_id)
+    if hotspot is None:
         raise HTTPException(status_code=404, detail="Hotspot not found")
-    return {"success": True, "data": paths}
+
+    # 解析三方向存储所需字段（spec 06 §7.2 + plan §Task 3）
+    video_id = hotspot.content_id or hotspot.id
+    title = hotspot.title or ""
+    up_name = ""
+    if hotspot.followed_up_id:
+        fu = await session.get(FollowedUp, hotspot.followed_up_id)
+        if fu is not None:
+            up_name = fu.display_name
+    markdown = hotspot.summary or ""
+    scheduled_at = agent_tools.default_scheduled_at()
+    # topic 优先用 hotspot.title；空则用 title 兜底
+    topic = hotspot.title or title or video_id
+
+    outcome = await archive_three_way(
+        video_id=video_id,
+        title=title,
+        up_name=up_name,
+        markdown=markdown,
+        scheduled_at=scheduled_at,
+        topic=topic,
+    )
+    return {
+        "success": True,
+        "data": {
+            "note_path": outcome.note_path,
+            "learning_event_id": outcome.learning_event_id,
+            "reminder_id": outcome.reminder_id,
+            "obsidian_task_written": outcome.obsidian_task_written,
+            "errors": outcome.errors,
+        },
+    }
+
+
+@router.post("/hotspots/{hotspot_id}/notify")
+async def notify_hotspot_route(
+    hotspot_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Notify on a hotspot via the configured push strategies (spec 06 plan §Task 4).
+
+    三重 gate：
+      1. ``settings.learning_notification_enabled`` 必须为 true。
+      2. hotspot 还没 ``notified``（防止重复推送）。
+      3. hotspot.decision_status == "worth_learning"（judge 通过才推送）。
+
+    触发后置 ``hotspot.notified = true`` 持久化到 DB。
+    Bearer 鉴权由 server 中间件统一处理。
+    """
+    from aipulse.hotspot.models import Hotspot
+    from aipulse.pushers.base import PushMessage
+    from aipulse.pushers.registry import get_push_registry
+
+    settings = get_global_settings()
+    if not settings.learning_notification_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "learning_notification_disabled",
+                "message": "settings.learning_notification_enabled is false",
+            },
+        )
+
+    hotspot = await session.get(Hotspot, hotspot_id)
+    if hotspot is None:
+        raise HTTPException(status_code=404, detail="Hotspot not found")
+
+    if hotspot.notified:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "already_notified",
+                "message": "hotspot already notified",
+                "hotspot_id": hotspot_id,
+            },
+        )
+
+    if hotspot.decision_status != "worth_learning":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "not_worth_learning",
+                "message": "hotspot.decision_status != worth_learning",
+                "decision_status": hotspot.decision_status,
+            },
+        )
+
+    registry = get_push_registry(settings)
+    message = PushMessage(
+        title=hotspot.title,
+        summary=hotspot.summary or "",
+        url=hotspot.url,
+        platform=hotspot.source_type,
+    )
+    sent_to: list[str] = []
+    for strategy in registry.list_configured():
+        try:
+            ok = await strategy.send(message)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Push strategy failed: %s", exc)
+            continue
+        if ok:
+            sent_to.append(type(strategy).__name__)
+
+    hotspot.notified = True
+    await session.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "hotspot_id": hotspot_id,
+            "notified": True,
+            "sent_to": sent_to,
+            "title": hotspot.title,
+        },
+    }
 
 
 @router.get("/keywords")
@@ -242,9 +382,33 @@ async def get_latest_digest_route(
 @router.post("/digests/generate")
 async def generate_digest_route(
     session: Annotated[AsyncSession, Depends(get_session)],
+    payload: GenerateDigestRequest | None = None,
 ) -> dict[str, Any]:
-    """Generate today's digest from current hotspots."""
-    digest = await generate_digest_service(session)
+    """Generate today's digest from current hotspots.
+
+    Body (optional):
+        {"date": "2026-07-25"} — defaults to today. If a digest already exists
+        for that date, return 409 with the existing record (idempotent UX).
+    """
+    from datetime import date as _date
+    from sqlalchemy import select
+
+    from aipulse.hotspot.models import DailyDigest
+
+    target_date = payload.target_date if payload and payload.target_date else _date.today()
+    stmt = select(DailyDigest).where(DailyDigest.date == target_date)
+    result = await session.execute(stmt)
+    dup = result.scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "digest_exists",
+                "date": target_date.isoformat(),
+                "existing": DailyDigestOut.model_validate(dup).model_dump(mode="json"),
+            },
+        )
+    digest = await generate_digest_service(session, target_date=target_date)
     return {"success": True, "data": DailyDigestOut.model_validate(digest)}
 
 
@@ -256,3 +420,126 @@ async def hotspots_sse(request: Request) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/settings")
+async def get_settings_route() -> dict[str, Any]:
+    """Return current AppSettings, grouped by section, with secrets masked."""
+    from aipulse.web.settings_map import build_settings_response
+
+    settings = get_global_settings()
+    return {"success": True, "data": build_settings_response(settings)}
+
+
+@router.post("/settings/obsidian-vault/scan")
+async def scan_obsidian_vault_route() -> dict[str, Any]:
+    """Return candidate Obsidian vault directories (spec E3).
+
+    The list merges:
+      * ``DEFAULT_VAULT_CANDIDATES`` — well-known macOS / iCloud / Nutstore
+        paths expanded against the current ``$HOME``.
+      * CWD ancestors up to 5 levels — useful when the project ships a
+        sample vault inside a few parent dirs.
+
+    Each entry reports whether the path currently exists so the UI can dim
+    out non-existent candidates. The endpoint is read-only and never
+    touches settings; it does NOT require the API token.
+    """
+    candidates: list[dict[str, Any]] = []
+
+    # 1) Default well-known locations. We keep the raw ``~`` form in the
+    # ``path`` field so the UI can show it verbatim; the UI expands it
+    # before sending PATCH /api/settings. ``exists`` is checked against the
+    # expanded path on disk.
+    for raw in DEFAULT_VAULT_CANDIDATES:
+        expanded = Path(raw).expanduser()
+        candidates.append(
+            {
+                "path": raw,
+                "exists": expanded.exists(),
+                "note": _candidate_note(raw),
+            }
+        )
+
+    # 2) CWD ancestors up to 5 levels
+    seen: set[str] = {c["path"] for c in candidates}
+    cwd = Path.cwd().resolve()
+    for level, ancestor in enumerate(_iter_ancestors(cwd, max_levels=5)):
+        key = str(ancestor)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(
+            {
+                "path": key,
+                "exists": ancestor.exists(),
+                "note": f"向上 {level + 1} 层",
+            }
+        )
+
+    return {"success": True, "data": {"candidates": candidates}}
+
+
+@router.patch("/settings")
+async def patch_settings_route(payload: SettingsUpdate) -> dict[str, Any]:
+    """Apply a partial update to AppSettings.
+
+    Semantics:
+      * Empty / masked secrets are preserved (UI can safely round-trip
+        masked placeholders without clearing the underlying value).
+      * New secret values overwrite the existing secret.
+      * Non-secret fields overwrite.
+      * Updated value is validated (e.g. obsidian_vault_path must exist) and
+        persisted to data/settings.json via AppSettings.save().
+      * After a successful update, the cached settings singleton is reset
+        so the next request reads the new values.
+    """
+    from pathlib import Path
+
+    from aipulse.web.settings_map import build_settings_response, update_settings
+
+    current = get_global_settings()
+    changes = payload.model_dump(exclude_unset=True)
+    updated = update_settings(current, changes)
+
+    # obsidian_vault_path existence is enforced by SettingsUpdate's
+    # field_validator (spec E4), so FastAPI returns 422 before we get here.
+    # No runtime check needed.
+
+    try:
+        updated.save()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to persist settings: {exc}") from exc
+
+    # Do NOT reset_global_settings() here: AppSettings.update() mutates in
+    # place and the cached singleton already reflects the new values.
+    # Resetting would discard the in-memory update (e.g. secrets that are
+    # not persisted to disk) and force the next GET to reconstruct an empty
+    # instance from settings.json alone.
+    return {"success": True, "data": build_settings_response(updated)}
+
+
+def _iter_ancestors(path: Path, *, max_levels: int) -> list[Path]:
+    """Walk from ``path`` upward, returning up to ``max_levels`` ancestors.
+
+    The starting directory itself is excluded — the spec asks for "CWD
+    ancestors up to 5 levels", not the CWD itself. ``/`` is the natural
+    terminus; we stop when ``parent == path``.
+    """
+    out: list[Path] = []
+    current = path.parent
+    while current != current.parent and len(out) < max_levels:
+        out.append(current)
+        current = current.parent
+    return out
+
+
+def _candidate_note(raw: str) -> str:
+    """Friendly note shown next to each default candidate."""
+    notes: dict[str, str] = {
+        "~/Documents": "用户目录下的 Documents",
+        "~/Library/Mobile Documents/iCloud~md~obsidian/Documents": "iCloud 同步的 Obsidian",
+        "~/Nutstore Files": "Nutstore 同步盘",
+        "~/坚果云": "坚果云同步盘",
+    }
+    return notes.get(raw, "")

@@ -55,8 +55,8 @@ describe('followedUp API client', () => {
     apiFetchMock.mockReset()
   })
 
-  it('listFollowed calls GET /api/followed-up and unwraps the items array', async () => {
-    apiFetchMock.mockResolvedValue({ items: [sampleFollowed], total: 1 })
+  it('listFollowed calls GET /api/followed-up and unwraps the data array', async () => {
+    apiFetchMock.mockResolvedValue({ success: true, data: [sampleFollowed] })
 
     const items = await listFollowed()
 
@@ -65,7 +65,7 @@ describe('followedUp API client', () => {
   })
 
   it('listFollowed accepts includeDeleted flag', async () => {
-    apiFetchMock.mockResolvedValue({ items: [], total: 0 })
+    apiFetchMock.mockResolvedValue({ success: true, data: [] })
 
     await listFollowed({ includeDeleted: true })
 
@@ -78,7 +78,7 @@ describe('followedUp API client', () => {
   })
 
   it('createFollowed posts the payload to /api/followed-up', async () => {
-    apiFetchMock.mockResolvedValue(sampleFollowed)
+    apiFetchMock.mockResolvedValue({ success: true, data: sampleFollowed })
 
     const payload: FollowedUpCreate = { platform: 'bilibili', uid: '1567748478' }
     const result = await createFollowed(payload)
@@ -91,7 +91,7 @@ describe('followedUp API client', () => {
   })
 
   it('getFollowed fetches by id', async () => {
-    apiFetchMock.mockResolvedValue(sampleFollowed)
+    apiFetchMock.mockResolvedValue({ success: true, data: sampleFollowed })
 
     const result = await getFollowed('fu_123')
 
@@ -100,7 +100,7 @@ describe('followedUp API client', () => {
   })
 
   it('updateFollowed patches only the provided fields', async () => {
-    apiFetchMock.mockResolvedValue({ ...sampleFollowed, is_active: false })
+    apiFetchMock.mockResolvedValue({ success: true, data: { ...sampleFollowed, is_active: false } })
 
     await updateFollowed('fu_123', { is_active: false })
 
@@ -111,7 +111,7 @@ describe('followedUp API client', () => {
   })
 
   it('deleteFollowed sends DELETE to the id-scoped resource', async () => {
-    apiFetchMock.mockResolvedValue({ ok: true })
+    apiFetchMock.mockResolvedValue({ success: true, data: { id: 'fu_123' } })
 
     await deleteFollowed('fu_123')
 
@@ -119,7 +119,10 @@ describe('followedUp API client', () => {
   })
 
   it('validateFollowed checks a uid+platform pair before creating', async () => {
-    apiFetchMock.mockResolvedValue({ valid: true, display_name: '李沐', avatar_url: null })
+    apiFetchMock.mockResolvedValue({
+      success: true,
+      data: { valid: true, display_name: '李沐', avatar_url: null },
+    })
 
     const result = await validateFollowed({ platform: 'bilibili', uid: '1567748478' })
 
@@ -131,11 +134,15 @@ describe('followedUp API client', () => {
   })
 
   it('syncFollowed triggers an immediate scan', async () => {
-    apiFetchMock.mockResolvedValue({ queued: true, scan_id: 'scan-1' })
+    // Backend returns: { success, data: { followed_up_id, status, new_videos } }
+    apiFetchMock.mockResolvedValue({
+      success: true,
+      data: { followed_up_id: 'fu_123', status: 'ok', new_videos: 3 },
+    })
 
     const result = await syncFollowed('fu_123')
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/followed-up/fu_123/sync', { method: 'POST' })
-    expect(result).toEqual({ queued: true, scan_id: 'scan-1' })
+    expect(result).toEqual({ followed_up_id: 'fu_123', status: 'ok', new_videos: 3 })
   })
 })

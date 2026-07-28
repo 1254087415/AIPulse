@@ -106,6 +106,10 @@ class FollowedUpRepository(Protocol):
         self, *, include_deleted: bool = False
     ) -> Sequence[FollowedUpRecord]: ...
 
+    async def count_active(self) -> int:
+        """Count currently active FollowedUp rows (exclude soft-deleted)."""
+        ...
+
     async def create(
         self,
         *,
@@ -173,6 +177,13 @@ class SqlAlchemyFollowedUpRepository:
             stmt = stmt.where(FollowedUp.deleted_at.is_(None))
         result = await self._session.execute(stmt)
         return [FollowedUpRecord(r) for r in result.scalars().all()]
+
+    async def count_active(self) -> int:
+        from sqlalchemy import func
+
+        stmt = select(func.count(FollowedUp.id)).where(FollowedUp.deleted_at.is_(None))
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one() or 0)
 
     async def create(
         self,

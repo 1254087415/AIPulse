@@ -3,6 +3,7 @@
 import json
 import re
 import uuid
+from datetime import date
 from typing import Any
 
 from sqlalchemy import func, select
@@ -209,8 +210,16 @@ async def get_latest_digest(session: AsyncSession) -> DailyDigest | None:
     return result.scalar_one_or_none()
 
 
-async def generate_digest(session: AsyncSession) -> DailyDigest:
-    """Generate a daily digest from the top hotspots of the last 24 hours."""
+async def generate_digest(
+    session: AsyncSession,
+    target_date: date | None = None,
+) -> DailyDigest:
+    """Generate a daily digest from the top hotspots of the last 24 hours.
+
+    Args:
+        target_date: The date to record on the digest (defaults to today).
+            Callers are responsible for pre-checking uniqueness on this date.
+    """
     from datetime import UTC, date, datetime, timedelta
 
     cutoff = datetime.now(UTC) - timedelta(hours=24)
@@ -229,8 +238,8 @@ async def generate_digest(session: AsyncSession) -> DailyDigest:
         result = await session.execute(stmt)
         hotspots = list(result.scalars().all())
 
-    today = date.today()
-    title = f"AIPulse AI 热点日报 · {today.strftime('%Y-%m-%d')}"
+    digest_date = target_date if target_date is not None else date.today()
+    title = f"AIPulse AI 热点日报 · {digest_date.strftime('%Y-%m-%d')}"
     lines = [f"# {title}", ""]
     for idx, hotspot in enumerate(hotspots, start=1):
         lines.append(f"{idx}. [{hotspot.title}]({hotspot.url})")
@@ -241,7 +250,7 @@ async def generate_digest(session: AsyncSession) -> DailyDigest:
     content = "\n".join(lines)
 
     digest = DailyDigest(
-        date=today,
+        date=digest_date,
         title=title,
         content=content,
         top_hotspot_ids=[h.id for h in hotspots],

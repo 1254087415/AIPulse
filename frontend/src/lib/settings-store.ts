@@ -11,6 +11,8 @@
  */
 
 const API_TOKEN_STORAGE_KEY = 'aipulse.apiToken'
+const ENV_API_TOKEN =
+  import.meta.env.VITE_API_TOKEN || import.meta.env.AIPULSE_API_TOKEN || ''
 
 /**
  * Returns the configured AIPulse API token, or an empty string when none is
@@ -23,10 +25,9 @@ export function getApiToken(): string {
   if (typeof window === 'undefined') return ''
   try {
     const value = window.localStorage.getItem(API_TOKEN_STORAGE_KEY)
-    return value ?? ''
+    return value ?? ENV_API_TOKEN
   } catch {
-    // Private mode / disabled storage — fall back to no auth.
-    return ''
+    return ENV_API_TOKEN
   }
 }
 

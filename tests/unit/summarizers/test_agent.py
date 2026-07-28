@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -88,10 +88,17 @@ class TestTools:
     def test_default_scheduled_at_is_future_iso(self):
         s = default_scheduled_at()
         parsed = datetime.fromisoformat(s)
-        # 应当在未来 23-25 小时
-        now = datetime.now(UTC)
-        delta = parsed - now
-        assert timedelta(hours=23) <= delta <= timedelta(hours=25)
+        # spec 06 §7.2：默认今天 20:00 Asia/Shanghai；已过 → 明天 20:00。
+        # 断言必须落在这两个候选之一 + 时区是 Asia/Shanghai (+08:00)。
+        assert parsed.tzinfo is not None
+        cn_tz = timezone(timedelta(hours=8))
+        cn_now = datetime.now(cn_tz)
+        today_20 = cn_now.replace(hour=20, minute=0, second=0, microsecond=0)
+        tomorrow_20 = today_20 + timedelta(days=1)
+        if cn_now >= today_20:
+            assert parsed.astimezone(cn_tz) == tomorrow_20
+        else:
+            assert parsed.astimezone(cn_tz) == today_20
 
 
 class TestSummarizeTool:
@@ -99,11 +106,13 @@ class TestSummarizeTool:
     @pytest.mark.asyncio
     async def test_summarize_returns_error_on_empty_transcript(self):
         # summarize 是 langchain @tool，需要 .ainvoke 或 .func 拿到底层函数
+        # R5-C (2026-07-26): summarize 改接 transcript_path（不再是 transcript 字符串）。
+        # 函数体强校验 path 非空，error 文案现在是 "transcript_path 必传"。
         result = await summarize.ainvoke(
-            {"video_id": "BV1", "transcript": "", "extra_context": ""}
+            {"video_id": "BV1", "transcript_path": "", "extra_context": ""}
         )
         assert result["ok"] is False
-        assert "字幕" in result["error"]
+        assert "transcript_path" in result["error"]
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -167,7 +176,14 @@ class TestRunPipelineContract:
             }
         )
 
-        with patch("aipulse.summarizers.agent.runner.get_agent_executor", return_value=fake_executor):
+        # `run_summary_pipeline` calls `build_agent_executor()` (the factory),
+        # not `get_agent_executor()` (the lazy singleton accessor). Patch the
+        # path the production code actually reads to keep this test
+        # deterministic across refactors that swap one accessor for the other.
+        with patch(
+            "aipulse.summarizers.agent.runner.build_agent_executor",
+            return_value=fake_executor,
+        ):
             result = await run_summary_pipeline(
                 video_id="BV1",
                 title="t",

@@ -35,6 +35,40 @@ describe('router', () => {
   })
 })
 
+describe('route table integrity (spec §6.14 / §8.1)', () => {
+  // Each of these 5 routes must map to its own dedicated view, not be aliased
+  // to a catch-all page like SettingsView or TasksView. We assert by name
+  // string, which keeps the test resilient to component refactors.
+  const expected: Record<string, string> = {
+    '/hotspot/:id': 'hotspot-detail',
+    '/keywords': 'keywords',
+    '/sources': 'sources',
+    '/jobs': 'jobs',
+    '/digests': 'digests',
+  }
+
+  for (const [path, name] of Object.entries(expected)) {
+    it(`registers ${path} → ${name}`, () => {
+      const match = ROUTES.find((route) => route.path === path)
+      expect(match).toBeDefined()
+      expect(match?.name).toBe(name)
+    })
+  }
+
+  it('does not alias /sources /keywords /jobs /digests /hotspot/:id to SettingsView', async () => {
+    // Spec §8.1: each route must land on its own view. Navigating to one of
+    // these paths must NOT resolve to the SettingsView component.
+    const settingsComponent = ROUTES.find((r) => r.path === '/settings')?.component
+    const targets = ['/sources', '/keywords', '/jobs', '/digests', '/hotspot/abc123']
+    for (const path of targets) {
+      await router.push(path).catch(() => undefined)
+      expect(router.currentRoute.value.matched[0]?.components?.default).not.toBe(
+        settingsComponent,
+      )
+    }
+  })
+})
+
 describe('createMemoryHistory compat', () => {
   it('does not throw when constructing memory history directly', () => {
     const history = createMemoryHistory()

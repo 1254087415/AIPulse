@@ -5,7 +5,7 @@ import logging
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 _SECRET_KEYS = {
     "llm_api_key",
-    "kimi_api_key",
     "feishu_secret",
     "wechat_appsecret",
     "wechat_bot_token",
@@ -23,7 +22,14 @@ _SECRET_KEYS = {
 
 
 class AppSettings(BaseSettings):
-    """Global application settings loaded from environment variables."""
+    """Global application settings loaded from environment variables.
+
+    Load order (later wins):
+      1. Built-in defaults declared on the model.
+      2. ``.env`` file in the working directory.
+      3. ``data/settings.json`` produced by ``AppSettings.save()`` so the
+         UI's PATCH /api/settings call persists across restarts.
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -35,20 +41,23 @@ class AppSettings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/aipulse.db"
     auto_create_tables: bool = False
 
-    # LLM
+    # LLM (Minimax via minimaxi.com) — single source of truth. v0.4 minimax
+    # switch: field renamed from kimi_* to llm_* + dropped KIMI_* alias.
+    # Legacy persisted settings.json keys (kimi_*/minimax_*) are migrated to
+    # llm_* on first load (see _load_persisted).
     llm_provider: str = "openai"
-    llm_api_key: SecretStr = Field(default=SecretStr(""))
-    llm_base_url: str = "https://api.kimi.com/coding/v1"
-    llm_model: str = "kimi-for-coding"
-
-    # v0.3 — Kimi specific (independent config; used by follow + learning phase)
-    # NOTE: kimi_* defaults are aligned with the Kimi coding endpoint per
-    # v0.3 spec §5.3 (kimi-for-coding + api.kimi.com/coding/v1). If the user
-    # later decides to keep llm_* as the canonical Kimi path instead, this
-    # block can be reverted.
-    kimi_api_key: SecretStr = Field(default=SecretStr(""))
-    kimi_base_url: str = "https://api.kimi.com/coding/v1"
-    kimi_model: str = "kimi-for-coding"
+    llm_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="LLM_API_KEY",
+    )
+    llm_base_url: str = Field(
+        default="https://api.minimaxi.com/v1",
+        validation_alias="LLM_BASE_URL",
+    )
+    llm_model: str = Field(
+        default="MiniMax-M2.5",
+        validation_alias="LLM_MODEL",
+    )
     learning_notification_enabled: bool = True
 
     # Whisper
@@ -99,9 +108,95 @@ class AppSettings(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure data directories exist after initialization."""
+        # Guard against recursive re-entry: Pydantic-settings sometimes
+        # re-invokes ``__init__``/``model_post_init`` while resolving
+        # source values, which would otherwise attempt to merge persisted
+        # JSON state into an already-merging instance and blow the stack.
+        if getattr(self, "_aipulse_post_init_done", False):
+            return
+        object.__setattr__(self, "_aipulse_post_init_done", True)
+
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.download_dir.mkdir(parents=True, exist_ok=True)
         self.scripts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Reload from the persisted JSON if it exists, so changes made via
+        # PATCH /api/settings survive process restarts. Apply the merge
+        # in-place (via ``update()``) to avoid constructing a new instance
+        # which would re-run ``model_post_init`` and re-parse ``.env``,
+        # recursing until the dotenv parser blows the stack.
+        persisted = self._load_persisted()
+        if persisted:
+            try:
+                self.update(**persisted)
+            except Exception:  # noqa: BLE001 — defensive: never block init
+                logger.exception("Failed to merge persisted settings")
+
+    _llm_migration_done: ClassVar[bool] = False
+
+    def _load_persisted(self) -> dict[str, Any]:
+        """Read data/settings.json and migrate legacy kimi_*/minimax_* → llm_*."""
+        path = self.settings_path
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.exception("Failed to read persisted settings at %s", path)
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+
+        # One-shot migration per process: legacy kimi_*/minimax_* → llm_*.
+        # minimax_* is the most recent pre-migration configuration state, so
+        # it wins over kimi_* when both are present. Drop leftover copies so
+        # the on-disk file does not keep redundant legacy keys.
+        if not self._llm_migration_done:
+            legacy_aliases: tuple[dict[str, str], ...] = (
+                {
+                    "minimax_api_key": "llm_api_key",
+                    "minimax_base_url": "llm_base_url",
+                    "minimax_model": "llm_model",
+                },
+                {
+                    "kimi_api_key": "llm_api_key",
+                    "kimi_base_url": "llm_base_url",
+                    "kimi_model": "llm_model",
+                },
+            )
+            for legacy in legacy_aliases:
+                for old_key, new_key in legacy.items():
+                    if old_key in raw and new_key not in raw:
+                        raw[new_key] = raw.pop(old_key)
+                    elif old_key in raw:
+                        raw.pop(old_key, None)
+            try:
+                self._write_persisted(raw)
+            except OSError:
+                logger.exception(
+                    "Failed to persist migrated settings at %s", path,
+                )
+            AppSettings._llm_migration_done = True
+
+        # Drop unknown keys so we don't re-introduce removed fields.
+        valid = set(self.model_dump().keys())
+        return {k: v for k, v in raw.items() if k in valid}
+
+    def _write_persisted(self, raw: dict[str, Any]) -> None:
+        """Persist a raw settings dict to data/settings.json.
+
+        Masked secrets are filtered out so the masked value never round-trips
+        to disk; unmasked values are written as-is.
+        """
+        payload = {
+            k: v
+            for k, v in raw.items()
+            if k not in _SECRET_KEYS or not self._is_masked_secret(v)
+        }
+        self.settings_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
 
     @property
     def scripts_dir(self) -> Path:
@@ -140,15 +235,19 @@ class AppSettings(BaseSettings):
         return resolved
 
     def save(self) -> None:
-        """Persist runtime overrides to a JSON file under data/settings.json."""
-        payload = self.to_client_dict()
+        """Persist runtime overrides to a JSON file under data/settings.json.
+
+        Non-secret overrides and non-empty secret values are written so they
+        survive process restarts. Empty secret values are skipped so a PATCH
+        with no secret field does not overwrite a previously persisted value
+        (CLAUDE.md: 保存时必须保留原有 secrets).
+        """
+        full = self.to_client_dict()
         # Only persist keys that may be changed at runtime.
         persist_keys = {
             "llm_provider",
             "llm_base_url",
             "llm_model",
-            "kimi_base_url",
-            "kimi_model",
             "learning_notification_enabled",
             "whisper_model",
             "obsidian_vault_path",
@@ -169,7 +268,18 @@ class AppSettings(BaseSettings):
             "ytdlp_user_agent",
             "http_user_agent_mobile",
         }
-        payload = {key: payload[key] for key in persist_keys if key in payload}
+        payload = {key: full[key] for key in persist_keys if key in full}
+        # Secrets: persist only when the user explicitly set a non-empty value
+        # via PATCH /api/settings. Empty secrets are omitted so .env remains
+        # the source of truth for unset secrets and a partial PATCH cannot
+        # silently clear a previously persisted secret. The on-disk value is
+        # masked (first4***last4 / ***) — the real secret stays in memory
+        # and is never written to disk, so a leaked settings.json cannot
+        # leak credentials (spec §9.5 / E6 follow-up).
+        for key in _SECRET_KEYS:
+            value = full.get(key)
+            if value:
+                payload[key] = self._mask_secret(value)
         try:
             self.settings_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, default=str),
@@ -200,30 +310,40 @@ class AppSettings(BaseSettings):
         return result
 
     def update(self, **changes: Any) -> "AppSettings":
-        """Return a new settings instance with the given changes applied."""
-        current = self.model_dump()
+        """Apply changes in place and return self.
+
+        Mutating the existing instance avoids re-running ``model_post_init``
+        on the new instance (which would re-merge persisted values from
+        ``data/settings.json`` and silently overwrite any caller-provided
+        changes that conflict with on-disk state).
+        """
+        # Validate security-sensitive paths before mutating.
+        new_script = changes.get("wechat_send_script")
+        if new_script:
+            self.validate_script_path(new_script, self.data_dir)
+
         for key in _SECRET_KEYS:
-            new_value = changes.get(key)
-            if new_value and not self._is_masked_secret(new_value):
-                current[key] = new_value
-            else:
-                # Preserve the existing secret when the incoming value is empty,
-                # masked, or omitted. This prevents the UI from clearing secrets
-                # when it sends back a masked placeholder.
-                current[key] = self._get_secret_value(key)
+            if key in changes:
+                new_value = changes[key]
+                if new_value and not self._is_masked_secret(new_value):
+                    self._set_secret_value(key, str(new_value))
+                # else: preserve existing secret when value is empty/masked/missing
         for key, value in changes.items():
             if key not in _SECRET_KEYS:
-                current[key] = value
-        # Validate security-sensitive paths before constructing the new instance.
-        new_script = current.get("wechat_send_script")
-        if new_script:
-            self.validate_script_path(new_script, Path(current.get("data_dir", self.data_dir)))
-        # Ensure Path fields are converted back to Path objects.
-        path_keys = {"data_dir", "download_dir", "obsidian_vault_path"}
-        for key in path_keys:
-            if key in current and not isinstance(current[key], Path):
-                current[key] = Path(current[key])
-        return AppSettings(**current)
+                if key in {"data_dir", "download_dir", "obsidian_vault_path"}:
+                    object.__setattr__(self, key, Path(value) if value else Path("."))
+                else:
+                    object.__setattr__(self, key, value)
+        return self
+
+    def _set_secret_value(self, key: str, value: str) -> None:
+        """Replace the SecretStr field on a frozen model without re-validation."""
+        current = getattr(self, key, None)
+        if isinstance(current, SecretStr):
+            current = SecretStr(value)
+            object.__setattr__(self, key, current)
+        else:
+            object.__setattr__(self, key, SecretStr(value))
 
     def validate_obsidian_vault(self) -> None:
         """Validate that the configured Obsidian vault path exists."""
@@ -262,3 +382,4 @@ def get_settings() -> AppSettings:
 def reset_settings() -> None:
     """Clear the cached settings instance (useful in tests)."""
     get_settings.cache_clear()
+    AppSettings._llm_migration_done = False
