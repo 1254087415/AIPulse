@@ -84,9 +84,10 @@ class TestScanById:
                 return_value=httpx.Response(200, json=sample_uapi_payload)
             )
 
-            new_count = await scan_followed_up_by_id(followed_up_id)
+            outcome = await scan_followed_up_by_id(followed_up_id)
 
-        assert new_count == 2  # 两条新视频
+        # v0.3 round 6: 返回 ScanOutcome
+        assert outcome.new_hotspots == 2  # 两条新视频
 
         # 检查 hotspots 已写
         health = await client.get(f"/api/followed-up/{followed_up_id}/health")
@@ -99,7 +100,9 @@ class TestScanById:
     @pytest.mark.asyncio
     async def test_scan_followed_up_by_id_not_found_returns_zero(self):
         result = await scan_followed_up_by_id("nonexistent-id")
-        assert result == 0
+        # v0.3 round 6: ScanOutcome
+        assert result.new_hotspots == 0
+        assert result.enqueued_summaries == 0
 
     @pytest.mark.integration
     @pytest.mark.asyncio
@@ -168,6 +171,9 @@ class TestSyncApi:
         body = sync_resp.json()["data"]
         assert body["status"] == "ok"
         assert body["new_videos"] == 2
+        # v0.3 round 6: sync 同时返回 enqueued_summaries（新 hotspot 入队数）
+        assert "enqueued_summaries" in body
+        assert isinstance(body["enqueued_summaries"], int)
 
     @pytest.mark.integration
     @pytest.mark.asyncio
