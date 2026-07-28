@@ -180,6 +180,18 @@ docs/_build/
 # Screenshots: 已 tracked PNG (spec05-* 等) 保留追踪; 未来新 PNG 默认忽略,
 # 需要时显式 `git add -f docs/.screenshots/<file>.png`
 docs/.screenshots/*.png
+# 验收上传证据: 已 tracked 历史图保留; 新的 verifier 截图默认忽略,
+# 需要保留请 `git add -f docs/superpowers/verifications/<file>.png`
+docs/superpowers/verifications/*.png
+
+# 顶层临时调试截图（与 web-*.png 同风格） — 默认不入库
+debug-*.png
+debug-*.jpg
+debug-*.jpeg
+screenshot-*.png
+screenshot-*.jpg
+screenshot-*.jpeg
+snap-*.png
 
 # Environment variable variants
 .env.*

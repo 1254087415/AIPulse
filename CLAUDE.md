@@ -106,6 +106,81 @@ AIPulse 是一个桌面端 AI 内容/任务管理工具，采用 Tauri + Python 
 - **抖音 note 页**：`lf-security.bytegoofy.com` 通过 `document.write` 注入 parser-blocking 反爬脚本，永不 `document_idle` → content script 不执行。测试里加 `page.route('**/*bytegoofy.com/**', r => r.abort())`（只拦第三方脚本，页面内容仍是真实 Douyin）。
 - **Bilibili AI 字幕**：`aisubtitle.hdslb.com` 返回 `Access-Control-Allow-Origin: *`，请求须 `credentials: 'omit'`，否则被 Chromium 拒绝（见 `background.ts` / `bilibili-subtitles.ts`）。
 
+## 启动开发服务
+
+> **每个 AI 工作时第一次必看**，避免花力气找启动方式。
+
+### 后端（Python sidecar / FastAPI）
+
+```bash
+cd ~/Documents/project/AIPulse
+uv run uvicorn aipulse.server:app --host 127.0.0.1 --port 8000
+# 后端实际源码在 src/aipulse/，不是 src-python/；src-python/ 路径已废弃
+# 占用 8000 端口；改 :18000 等非常用端口会让 verifier / Playwright 走错
+```
+
+健康检查：
+
+```bash
+curl -sS --max-time 3 http://127.0.0.1:8000/health    # → {"success":true,"data":{"status":"ok"}}
+```
+
+### 前端（Vue 3 + Vite）
+
+```bash
+cd ~/Documents/project/AIPulse/frontend
+pnpm dev --host 127.0.0.1 --port 5173
+```
+
+Vite 配置（`frontend/vite.config.ts`）：
+
+- `proxy.target` = `http://127.0.0.1:8000`（PR #5 已修，**不要回滚成 18000**）
+- `envDir: '..'` 让 Vite 从**项目根 .env** 读 `AIPULSE_API_TOKEN`
+- `envPrefix: ['VITE_', 'TAURI_', 'AIPULSE_API_TOKEN']`
+
+⚠️ **如果改了 vite proxy target，verifier / 真 Playwright 验证会撞 502。** 改后跑 `curl http://127.0.0.1:5173/api/sources` 确认可转发。
+
+### 并行启动（dashboard + 真 E2E 用）
+
+```bash
+# Terminal 1
+uv run uvicorn aipulse.server:app --host 127.0.0.1 --port 8000
+
+# Terminal 2
+cd frontend && pnpm dev --host 127.0.0.1 --port 5173
+```
+
+启动后浏览器打开 `http://127.0.0.1:5173/dashboard` 看到 6 sidebar 全部数据，**前提**是先有真 UP 主在 `data/aipulse.db` 的 `followed_up` 表里（没数据则页面 empty state）。
+
+### 数据 + 配置
+
+| 路径 | 说明 |
+|------|------|
+| `data/aipulse.db` | SQLite 主库；gitignored；schema 在 `data/` 有 snapshot 备份（`*.roundN-backup`） |
+| `data/settings.json` | 用户配置（Vault 路径、Secret 掩码、API Token 等）；gitignored |
+| `.env` | 项目根环境变量；含真 LLM API key（per `project_env-true-key-status` 用户不撤销） |
+| `.env.example` | 占位符版本；可提交 |
+
+⚠️ **.env 真 key 严禁 cat/echo 输出到日志**（per `project_secrets-leak-2026-07-26` Kimi key 泄漏事故）。grep 时只展示变量名，不展示值。
+
+### 进程清理
+
+遗留后台进程会留下 vestigial state（8000 / 5173 / 18000 端口）影响下次启动。结束时 kill：
+
+```bash
+lsof -nP -iTCP:5173 -iTCP:8000 -iTCP:18000 -sTCP:LISTEN
+kill <PID>    # 或 kill 5174 5175 等 vite 多余实例
+```
+
+### 故障排查
+
+| 症状 | 原因 | 修法 |
+|------|------|------|
+| 浏览器 `localhost:5173/api/*` 返 502 | 后端没起或 vite proxy 错 | 检查 :8000 是否 uvicorn 跑着；`grep target frontend/vite.config.ts` |
+| `/api/hotspots` 返 401 | `.env` 有 `AIPULSE_API_TOKEN` 但 frontend 没带 | vite 需从 `.env` 读（已配 envPrefix）；如 token 不一致就在 Settings → API 鉴权 重新填 |
+| `Failed to load resource` CORS | vite proxy 没生效 | 确认 `curl http://127.0.0.1:5173/api/health` 转发到后端 |
+| Apple Reminder osascript timeout | `create_reminder(executor_timeout_s=5)` 默认 5s 太短 | 调高；或先 `osascript -e 'tell application "Reminders" to ...'` 直接测试 |
+
 ## 不应出现在这里的
 
 - 通用代码风格、测试覆盖率、TDD 流程、Git 提交规范、安全审查清单 → 见 `.claude/rules/ecc/`
