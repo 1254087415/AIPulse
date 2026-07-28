@@ -95,6 +95,7 @@ const onEdit = (): void => emit('edit', props.followed.id)
     </div>
 
     <div class="follow-card__actions">
+      <slot name="detail" />
       <button
         type="button"
         class="follow-card__btn"
@@ -256,6 +257,20 @@ const onEdit = (): void => emit('edit', props.followed.id)
   align-items: stretch;
 }
 
+.follow-card__detail-link {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-coral);
+  border-radius: var(--radius-sm);
+  color: var(--accent-coral);
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.follow-card__detail-link:hover {
+  background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
+}
 .follow-card__btn {
   appearance: none;
   background: var(--surface-bg);

@@ -28,6 +28,7 @@ import KeywordsView from '../views/KeywordsView.vue'
 import JobsView from '../views/JobsView.vue'
 import DigestsView from '../views/DigestsView.vue'
 import HotspotDetailView from '../views/HotspotDetailView.vue'
+import UpDetailView from '../views/UpDetailView.vue'
 
 export const ROUTES: RouteRecordRaw[] = [
   { path: '/', redirect: '/dashboard' },
@@ -36,6 +37,12 @@ export const ROUTES: RouteRecordRaw[] = [
     path: '/dashboard/followed',
     name: 'dashboard-followed',
     component: DashboardView,
+  },
+  {
+    path: '/up/:uid',
+    name: 'up-detail',
+    component: UpDetailView,
+    props: true,
   },
   {
     path: '/followed-up/:uid',

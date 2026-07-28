@@ -156,16 +156,104 @@ async def list_followed_up_route(
     }
 
 
+@router.get("/{followed_up_key}/hotspots")
+async def list_followed_up_hotspots_route(
+    followed_up_key: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    """Return recent hotspots associated with a followed-up record."""
+    record = await _find_followed_up(session, followed_up_key)
+    stmt = (
+        select(Hotspot)
+        .where(Hotspot.followed_up_id == record.id)
+        .order_by(desc(Hotspot.created_at))
+        .offset(offset)
+        .limit(limit)
+    )
+    hotspots = (await session.execute(stmt)).scalars().all()
+    return {
+        "success": True,
+        "data": [_serialize_hotspot(hotspot) for hotspot in hotspots],
+        "meta": {"offset": offset, "limit": limit},
+    }
+
+
+@router.get("/{followed_up_key}/sync-history")
+async def list_followed_up_sync_history_route(
+    followed_up_key: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> dict[str, Any]:
+    """Return recent summary/sync jobs associated with a followed-up record."""
+    record = await _find_followed_up(session, followed_up_key)
+    stmt = (
+        select(SummaryJob)
+        .join(Hotspot, Hotspot.content_id == SummaryJob.video_id, isouter=True)
+        .where(
+            (Hotspot.followed_up_id == record.id)
+            | (SummaryJob.up_name == record.display_name)
+        )
+        .order_by(desc(SummaryJob.created_at))
+        .limit(limit)
+    )
+    jobs = (await session.execute(stmt)).scalars().all()
+    return {
+        "success": True,
+        "data": [_serialize_sync_history(job) for job in jobs],
+        "meta": {"limit": limit},
+    }
+
+
+async def _find_followed_up(session: AsyncSession, key: str) -> Any:
+    repo = SqlAlchemyFollowedUpRepository(session)
+    record = await repo.find_by_id(key)
+    if record is None:
+        record = await repo.get_by_platform_uid("bilibili", key)
+    if record is None or record.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    return record
+
+
+def _record_response(record: Any) -> dict[str, Any]:
+    return FollowedUpResponse.model_validate(record).model_dump()
+
+
+def _serialize_hotspot(hotspot: Hotspot) -> dict[str, Any]:
+    return {
+        "id": hotspot.id,
+        "title": hotspot.title,
+        "url": hotspot.url,
+        "canonical_url": hotspot.canonical_url,
+        "summary": hotspot.summary,
+        "source_type": hotspot.source_type,
+        "published_at": hotspot.published_at.isoformat() if hotspot.published_at else None,
+        "created_at": hotspot.created_at.isoformat() if hotspot.created_at else None,
+        "heat_score": hotspot.heat_score,
+    }
+
+
+def _serialize_sync_history(job: SummaryJob) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "video_id": job.video_id,
+        "title": job.title,
+        "status": job.status,
+        "error": job.error,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
 @router.get("/{followed_up_id}")
 async def get_followed_up_route(
     followed_up_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Return a single FollowedUp by id."""
-    repo = SqlAlchemyFollowedUpRepository(session)
-    record = await repo.find_by_id(followed_up_id)
-    if record is None or record.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    """Return a single FollowedUp by id or platform uid."""
+    record = await _find_followed_up(session, followed_up_id)
     return {
         "success": True,
         "data": FollowedUpResponse.model_validate(record).model_dump(),
