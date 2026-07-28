@@ -192,6 +192,11 @@ onMounted(() => {
           <template #health>
             <HealthBadge :status="item.health" />
           </template>
+          <template #detail>
+            <router-link class="follow-card__detail-link" :to="`/up/${encodeURIComponent(item.uid)}`">
+              查看详情
+            </router-link>
+          </template>
         </FollowCard>
       </li>
     </ul>
