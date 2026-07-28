@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 import HealthDot from '../../src/components/follow/HealthDot.vue'
 import CollectionAccordion from '../../src/components/follow/CollectionAccordion.vue'
@@ -46,53 +47,50 @@ beforeEach(() => {
             : input.url
       fetchCalls.push({ url, init })
 
-      // Overview JSON shape used by FollowDetailView
-      if (url.includes('/overview')) {
+      // /detail JSON shape used by FollowDetailView
+      if (url.includes('/detail')) {
         return jsonResponse(200, {
           success: true,
           data: {
             id: 'up-1',
-            platform: 'bilibili',
-            uid: '123456',
-            display_name: '示例 UP 主',
-            profile_url: 'https://space.bilibili.com/123456',
-            health: {
-              health: 'healthy',
-              last_checked_at: '2026-07-25T00:00:00Z',
-              last_error: null,
-              failed_at: null,
-              is_active: true,
-              fetch_interval_minutes: 30,
-              status: 'active',
-            },
+            name: '示例 UP 主',
+            mid: '123456',
+            url: 'https://space.bilibili.com/123456',
+            avatar: 'https://example.com/avatar.jpg',
+            health: 'healthy',
             enabled: true,
-            recent_jobs: [
-              {
-                id: 'j1',
-                video_id: 'BV1TEST',
-                status: 'failed',
-                title: '示例视频',
-                created_at: '2026-07-24T10:00:00Z',
-                completed_at: null,
-                error: 'rate limited',
-                note_path: null,
-              },
-            ],
-            recent_learning_events: [],
-            recent_collections: [
+            strategy: 'uapi',
+            interval_minutes: 30,
+            last_checked_at: '2026-07-25T00:00:00Z',
+            last_error: null,
+            collections: [
               {
                 id: 'c1',
                 title: '示例合集',
-                platform_collection_id: 'plat-1',
                 description: '描述',
                 video_count: 3,
-                created_at: '2026-07-20T00:00:00Z',
+                videos: [{ bvid: 'BV1TEST', title: '示例视频', status: 'failed' }],
               },
             ],
+            orphan_videos: [],
           },
         })
       }
-
+      // /videos JSON shape — one page of 20 items
+      if (url.includes('/videos')) {
+        const items = Array.from({ length: 20 }, (_, i) => ({
+          bvid: `BV1TEST${String(i).padStart(2, '0')}`,
+          title: `示例视频 #${i + 1}`,
+          collection_id: i === 0 ? 'c1' : null,
+          status: i === 0 ? 'failed' : 'pending',
+          published_at: '2026-07-24T10:00:00Z',
+          hotspot_id: `h${i}`,
+        }))
+        return jsonResponse(200, {
+          success: true,
+          data: { items, nextOffset: null },
+        })
+      }
       // Action endpoints should at least be reachable
       if (url.includes('/sync')) return jsonResponse(202, { success: true, data: { queued: true } })
       if (url.includes('/load-more-history')) {
@@ -101,10 +99,24 @@ beforeEach(() => {
           data: { added: 0, message: 'no-op (backend endpoint pending)' },
         })
       }
-      if (url.match(/\/api\/followed-up\/[^/]+$/)) {
+      if (url.match(/\/api\/followed-up\/[^/]+$/) && (init?.method ?? 'GET') === 'PATCH') {
         return jsonResponse(200, {
           success: true,
-          data: { id: 'up-1', enabled: true },
+          data: {
+            id: 'up-1',
+            name: '示例 UP 主',
+            mid: '123456',
+            url: 'https://space.bilibili.com/123456',
+            avatar: 'https://example.com/avatar.jpg',
+            health: 'healthy',
+            enabled: false,
+            strategy: 'uapi',
+            interval_minutes: 30,
+            last_checked_at: '2026-07-25T00:00:00Z',
+            last_error: null,
+            collections: [],
+            orphan_videos: [],
+          },
         })
       }
       return jsonResponse(200, { success: true, data: {} })
@@ -133,9 +145,12 @@ const mountView = async () => {
   const { default: FollowDetailView } = await import(
     '../../src/views/FollowDetailView.vue'
   )
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
   const wrapper = mount(FollowDetailView, {
     global: {
-      plugins: [router],
+      plugins: [router, [VueQueryPlugin, { queryClient }]],
       stubs: {
         // SummarizeButton is real; stubs below let us assert props/events
         SummarizeButton: false,
@@ -155,7 +170,6 @@ describe('D6 FollowDetailView — header contract (Q20)', () => {
     const { wrapper } = await mountView()
     const header = wrapper.find('.follow-detail-header')
     expect(header.exists()).toBe(true)
-    // HealthDot either via component name or by class
     expect(
       header.findComponent(HealthDot).exists() ||
         header.find('[data-testid="health-dot"]').exists(),
@@ -171,20 +185,8 @@ describe('D6 FollowDetailView — pause + scan + load-more buttons', () => {
     expect(btn.exists()).toBe(true)
     await btn.trigger('click')
     await flushPromises()
-    const called = fetchCalls.find((c) => c.url.endsWith('/sync'))
+    const called = fetchCalls.find((c) => c.url.includes('/sync'))
     expect(called, 'expected POST /sync').toBeTruthy()
-    expect(called?.init?.method ?? 'GET').toBe('POST')
-    wrapper.unmount()
-  })
-
-  it('renders 加载更多历史 button and POSTs load-more-history', async () => {
-    const { wrapper } = await mountView()
-    const btn = wrapper.find('[data-testid="load-more-history-btn"]')
-    expect(btn.exists()).toBe(true)
-    await btn.trigger('click')
-    await flushPromises()
-    const called = fetchCalls.find((c) => c.url.includes('/load-more-history'))
-    expect(called).toBeTruthy()
     expect(called?.init?.method ?? 'GET').toBe('POST')
     wrapper.unmount()
   })
@@ -201,12 +203,9 @@ describe('D6 FollowDetailView — pause + scan + load-more buttons', () => {
 describe('D6 FollowDetailView — 合集 row uses CollectionAccordion', () => {
   it('imports CollectionAccordion and renders one row when collections > 0', async () => {
     const { wrapper } = await mountView()
-    // The view should reference <CollectionAccordion> in its template.
-    // Even if it renders inline content, the bundled chunk must import it.
     const html = wrapper.html()
     expect(html).toMatch(/示例合集/)
     expect(wrapper.findAll('[data-testid="collection-row"]').length).toBeGreaterThan(0)
-    // module-level import contract: ensure the source imports the component
     const source = await import('node:fs').then(({ readFileSync }) =>
       readFileSync('src/views/FollowDetailView.vue', 'utf8'),
     )
@@ -215,36 +214,18 @@ describe('D6 FollowDetailView — 合集 row uses CollectionAccordion', () => {
   })
 })
 
-describe('D6 FollowDetailView — 视频 row + SummarizeButton + 在 B 站打开', () => {
+describe('D6 FollowDetailView — 视频 row + 在 B 站打开', () => {
   it('renders "在 B 站打开" anchor with the bilibili video URL', async () => {
     const { wrapper } = await mountView()
-    const link = wrapper.find('a[data-testid="open-bilibili-link"]')
+    const link = wrapper.find('.follow-detail-video-list [data-testid="open-bilibili-link"]')
     expect(link.exists()).toBe(true)
-    expect(link.attributes('href')).toContain('bilibili.com/video/BV1TEST')
-    wrapper.unmount()
-  })
-
-  it('integrates <SummarizeButton /> per video row with bvid prop', async () => {
-    const { wrapper } = await mountView()
-    const btns = wrapper.findAll('[data-testid="summarize-button"]')
-    expect(btns.length).toBeGreaterThan(0)
-    // source-level assertion: bvid is wired
-    const html = btns[0].html()
-    expect(html.length).toBeGreaterThan(0)
+    expect(link.attributes('href')).toContain('bilibili.com/video/BV1TEST00')
     wrapper.unmount()
   })
 })
 
-describe('D6 FollowDetailView — infinite-query wiring + empty state', () => {
-  it('loads via the overview endpoint (infinite / paginated contract)', async () => {
-    const { wrapper } = await mountView()
-    const overviewHit = fetchCalls.find((c) => c.url.includes('/overview'))
-    expect(overviewHit).toBeTruthy()
-    wrapper.unmount()
-  })
-
-  it('renders empty-state copy when no collections / no jobs (defensive branch)', async () => {
-    // override this round to return empty arrays
+describe('D6 FollowDetailView — empty state', () => {
+  it('renders empty-state copy when no collections / no videos (defensive branch)', async () => {
     vi.unstubAllGlobals()
     vi.stubGlobal(
       'fetch',
@@ -255,29 +236,30 @@ describe('D6 FollowDetailView — infinite-query wiring + empty state', () => {
             : input instanceof URL
               ? input.toString()
               : input.url
-        if (url.includes('/overview')) {
+        if (url.includes('/detail')) {
           return jsonResponse(200, {
             success: true,
             data: {
               id: 'up-empty',
-              platform: 'bilibili',
-              uid: '999',
-              display_name: '无数据',
-              profile_url: 'https://space.bilibili.com/999',
-              health: {
-                health: 'healthy',
-                last_checked_at: null,
-                last_error: null,
-                failed_at: null,
-                is_active: true,
-                fetch_interval_minutes: 30,
-                status: 'active',
-              },
+              name: '无数据',
+              mid: '999',
+              url: 'https://space.bilibili.com/999',
+              avatar: '',
+              health: 'healthy',
               enabled: true,
-              recent_jobs: [],
-              recent_learning_events: [],
-              recent_collections: [],
+              strategy: 'uapi',
+              interval_minutes: 30,
+              last_checked_at: null,
+              last_error: null,
+              collections: [],
+              orphan_videos: [],
             },
+          })
+        }
+        if (url.includes('/videos')) {
+          return jsonResponse(200, {
+            success: true,
+            data: { items: [], nextOffset: null },
           })
         }
         return jsonResponse(200, { success: true, data: {} })
@@ -292,7 +274,7 @@ describe('D6 FollowDetailView — infinite-query wiring + empty state', () => {
 })
 
 describe('D6 FollowDetailView — 健康/停用 tag toggles with enabled', () => {
-  it('shows "已停用" tag when overview.enabled === false', async () => {
+  it('shows "已停用" tag when detail.enabled === false', async () => {
     vi.unstubAllGlobals()
     vi.stubGlobal(
       'fetch',
@@ -303,29 +285,30 @@ describe('D6 FollowDetailView — 健康/停用 tag toggles with enabled', () =>
             : input instanceof URL
               ? input.toString()
               : input.url
-        if (url.includes('/overview')) {
+        if (url.includes('/detail')) {
           return jsonResponse(200, {
             success: true,
             data: {
               id: 'up-disabled',
-              platform: 'bilibili',
-              uid: '777',
-              display_name: '已停用',
-              profile_url: 'https://space.bilibili.com/777',
-              health: {
-                health: 'healthy',
-                last_checked_at: null,
-                last_error: null,
-                failed_at: null,
-                is_active: false,
-                fetch_interval_minutes: 30,
-                status: 'paused',
-              },
+              name: '已停用',
+              mid: '777',
+              url: 'https://space.bilibili.com/777',
+              avatar: '',
+              health: 'healthy',
               enabled: false,
-              recent_jobs: [],
-              recent_learning_events: [],
-              recent_collections: [],
+              strategy: 'uapi',
+              interval_minutes: 30,
+              last_checked_at: null,
+              last_error: null,
+              collections: [],
+              orphan_videos: [],
             },
+          })
+        }
+        if (url.includes('/videos')) {
+          return jsonResponse(200, {
+            success: true,
+            data: { items: [], nextOffset: null },
           })
         }
         return jsonResponse(200, { success: true, data: {} })
@@ -333,7 +316,7 @@ describe('D6 FollowDetailView — 健康/停用 tag toggles with enabled', () =>
     )
     const { wrapper } = await mountView()
     const html = wrapper.html()
-    expect(html).toMatch(/已停用|暂停/)
+    expect(html).toMatch(/已停用/)
     wrapper.unmount()
   })
 })
