@@ -17,7 +17,54 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(__dirname, '../../../../..');
-export const PYTHON = path.resolve(PROJECT_ROOT, '.venv/bin/python');
+
+/**
+ * Resolve the Python interpreter used to launch the sidecar.
+ * Prefer the project-local venv (`.venv/bin/python`) when it exists; otherwise
+ * fall back to the active `python3` / `python` on PATH. The fallback is what
+ * the test fleet actually uses in the AIStudio dev environment, where deps
+ * live in /opt/anaconda3 and no per-project venv is created.
+ */
+function resolvePython(projectRoot: string): string {
+  const venvPython = path.join(projectRoot, '.venv', 'bin', 'python');
+  if (fs.existsSync(venvPython)) return venvPython;
+  // Prefer `python3` (always present on macOS/Linux); fall back to `python`.
+  for (const candidate of ['python3', 'python']) {
+    const resolved = spawnSync(candidate, ['--version']);
+    if (resolved.status === 0) return candidate;
+  }
+  return 'python3';
+}
+
+function spawnSync(cmd: string, args: string[]): { status: number | null } {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('child_process').spawnSync(cmd, args, { stdio: 'ignore' });
+  } catch {
+    return { status: null };
+  }
+}
+
+export const PYTHON = resolvePython(PROJECT_ROOT);
+
+/**
+ * Resolve the aipulse package source root that should be added to PYTHONPATH
+ * before invoking `python -m aipulse.desktop.sidecar`. The repo currently
+ * ships the package under `src/aipulse`; older layouts used `src-python/aipulse`.
+ * Pick whichever exists.
+ */
+function resolvePackageRoot(projectRoot: string): string {
+  for (const candidate of ['src-python', 'src']) {
+    const abs = path.join(projectRoot, candidate);
+    if (fs.existsSync(path.join(abs, 'aipulse', 'desktop', 'sidecar.py'))) {
+      return abs;
+    }
+  }
+  // Last resort: assume `src`.
+  return path.join(projectRoot, 'src');
+}
+
+export const PACKAGE_ROOT = resolvePackageRoot(PROJECT_ROOT);
 
 interface SidecarResponse {
   jsonrpc: '2.0';
@@ -135,7 +182,7 @@ export async function startRealBackend(
   };
   const proc = spawn(PYTHON, ['-m', 'aipulse.desktop.sidecar'], {
     cwd: PROJECT_ROOT,
-    env: sidecarEnv,
+    env: { ...sidecarEnv, PYTHONPATH: PACKAGE_ROOT },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const client = new SidecarClient(proc);
