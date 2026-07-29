@@ -32,6 +32,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -132,7 +133,7 @@ def _delete_reminders_list_if_test_only(list_name: str) -> bool:
     end tell
     '''
     try:
-        result = subprocess.run(  # noqa: F821
+        result = subprocess.run(
             ["osascript", "-e", script], capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0 and result.stdout.strip() == "deleted"
