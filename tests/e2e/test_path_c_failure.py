@@ -213,12 +213,22 @@ async def e2e_run(
     # 跨 test 状态下 conftest autouse 已建了 :memory: engine, 旧 worker
     # 拿着旧 session_maker 引用查不到新 file DB 的 row。
     from aipulse.summarizers.queue import get_queue as _get_queue
-    from aipulse.store.database import get_engine, reset_db
+    from aipulse.store.database import (
+        _engine_override,
+        get_engine,
+        reset_db,
+    )
+    from sqlalchemy.ext.asyncio import (
+        async_sessionmaker,
+        AsyncSession,
+        create_async_engine,
+    )
+    from sqlalchemy.pool import StaticPool
 
     # 0a. 停掉所有残留 worker — 多轮 cancel + wait, 防止 cancel 还在
     # asyncio 调度队列里时新 engine 已就绪、worker 拿到旧 session_maker
     # 引用后查不到新 DB 的 row。
-    for _attempt in range(3):
+    for _attempt in range(5):
         _q = _get_queue()
         if _q is not None:
             _task = getattr(_q, "_worker_task", None)
@@ -244,20 +254,39 @@ async def e2e_run(
     _qmod._queue = None
     _qmod.drop_queue_sync()
 
-    # 等一轮 event loop tick 确保所有 cancellable task 真的退出
-    await asyncio.sleep(0)
+    # 等多轮 event loop tick + sleep 确保所有 cancellable task 真退出
+    for _ in range(3):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.3)
 
+    # 0d. 用 StaticPool + file-based URL 自建 engine, 强制单 connection 共享。
+    # 默认 AsyncAdaptedQueuePool 下 file-based 也会创建新 connection,
+    # aiosqlite 同进程跨 connection 看不到未 commit 数据; StaticPool
+    # 把所有 connection 复用成同一个, 解决这个 race。
     db_file = tmp_path / "path_c_failure.db"
     db_url = f"sqlite+aiosqlite:///{db_file}"
     os.environ["DATABASE_URL"] = db_url
     get_settings.cache_clear()
-    await configure_test_database(get_settings())
 
+    new_engine = create_async_engine(
+        db_url,
+        echo=False,
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    # 关键: 覆写 module-level _engine_override, 让 get_engine() 返我们的新 engine
+    import aipulse.store.database as _dbmod
+
+    _dbmod._engine_override = new_engine
     get_engine.cache_clear()
     get_session_maker.cache_clear()
     await reset_db()  # create tables on file DB
 
-    # 0d. Build our own client + session against the new engine ----
+    for _ in range(2):
+        await asyncio.sleep(0)
+
+    # 0e. Build our own client + session against the new engine ----
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
     db_session_maker = get_session_maker()
     db_session = db_session_maker()
