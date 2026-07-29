@@ -209,18 +209,55 @@ async def e2e_run(
     from aipulse.server import app
 
     # ---- 0. Build file-based engine BEFORE any other fixture touches DB ----
+    # 关键: 必须先 dispose 旧 engine + 彻底停掉旧 worker task, 否则
+    # 跨 test 状态下 conftest autouse 已建了 :memory: engine, 旧 worker
+    # 拿着旧 session_maker 引用查不到新 file DB 的 row。
+    from aipulse.summarizers.queue import get_queue as _get_queue
+    from aipulse.store.database import get_engine, reset_db
+
+    # 0a. 停掉所有残留 worker — 多轮 cancel + wait, 防止 cancel 还在
+    # asyncio 调度队列里时新 engine 已就绪、worker 拿到旧 session_maker
+    # 引用后查不到新 DB 的 row。
+    for _attempt in range(3):
+        _q = _get_queue()
+        if _q is not None:
+            _task = getattr(_q, "_worker_task", None)
+            if _task is not None and not _task.done():
+                _task.cancel()
+                try:
+                    await asyncio.wait_for(_task, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):  # noqa: BLE001
+                    pass
+        if _q is None or getattr(_q, "_worker_task", None) is None or _q._worker_task.done():
+            break
+
+    # 0b. Dispose 旧 engine, 强制关闭所有 connection
+    try:
+        old_engine = get_engine()
+        await old_engine.dispose()
+    except Exception:
+        pass
+
+    # 0c. 完全重置 queue singleton + DB engine
+    from aipulse.summarizers import queue as _qmod
+
+    _qmod._queue = None
+    _qmod.drop_queue_sync()
+
+    # 等一轮 event loop tick 确保所有 cancellable task 真的退出
+    await asyncio.sleep(0)
+
     db_file = tmp_path / "path_c_failure.db"
     db_url = f"sqlite+aiosqlite:///{db_file}"
     os.environ["DATABASE_URL"] = db_url
     get_settings.cache_clear()
     await configure_test_database(get_settings())
-    from aipulse.store.database import get_engine, reset_db
 
     get_engine.cache_clear()
     get_session_maker.cache_clear()
     await reset_db()  # create tables on file DB
 
-    # ---- 0b. Build our own client + session against the new engine ----
+    # 0d. Build our own client + session against the new engine ----
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
     db_session_maker = get_session_maker()
     db_session = db_session_maker()
