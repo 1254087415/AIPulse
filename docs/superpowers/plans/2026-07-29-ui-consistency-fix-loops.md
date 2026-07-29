@@ -95,7 +95,13 @@
 
 - [x] Loop A（H1+M1+H3）— 分支 `ui-fix/loop-a-buttons-headers`，merge `a942fa6`（verifier GREEN-WITH-WARN，12 页实拍全过；M-1「查看详情」链接转 Loop D；L-1 `--state-*` 上移 tokens.css 留作可选；L-3 提醒：pnpm 11 会写 `packageManager` 字段噪音，worker 勿提交）
 - [x] Loop B（H2+M3+L5）— 分支 `ui-fix/loop-b-error-sanitize`，merge `f575735`（verifier GREEN-WITH-WARN，4 页实拍 + H2 反向测试过；遗留：FollowCard/FollowDetailView 的 `last_error` 未接 errorMessage → 转 Loop D；LLM 特有错误 insufficient_quota/context_length_exceeded 等映射可按需补充）
-- [ ] Loop C（M2+M4+M5+L2+M6）— worker 分支 `ui-fix/loop-c-status-format-empty`
+- [x] Loop C（M2+M4+M5+L2+M6）— 分支 `ui-fix/loop-c-status-format-empty`，merge `7297bce`（verifier GREEN-WITH-WARN，7 页实拍全过、时区/测试契约两裁决均通过；**验证中挖出既有后端时区缺陷 → 见 §9 新立项**）
+
+## 9. 新增立项（Loop C verifier 挖出，非 UI loop 范围）
+
+- **[High] 后端时区缺陷**：ORM DATETIME 在 SQLite bind 丢 tzinfo，API 输出 naive UTC 字符串 → `frontend/src/lib/format.ts:59` fallback 按 +08:00 解释 → 前端时间比真实北京时间慢 8 小时（pre-existing，旧 toLocaleString 同样误读）。更严重：`src/aipulse/scheduler/jobs/followed_up_scan.py:38` `_is_due` 比较 naive/aware datetime 抛 `TypeError`，调度器扫描任务运行时崩溃（verifier 后端日志实捕）。`src/aipulse/store/repository.py:48,60,114` 仍在用 `datetime.utcnow()`。修复方向：后端统一存储/输出 tz-aware（或 API 序列化补 `+00:00`），format.ts 无需改。需后端单测覆盖 `_is_due` 时区比较。
+- [Low] `format.ts:57` 纯日期串渲染为 `… 00:00`，「某日」误示为「当日零点」。
+- [Low] `JobsView.vue` 任务名 tooltip 仅 hover 可达，无键盘/触屏途径。
 - [ ] Loop D（M7+L1+L3+L4）— worker 分支 `ui-fix/loop-d-hotspot-card-misc`
 
 **全部收官后挂账**：① spec 09 §3.5/§5.5 vault scan 契约回写（实现是 POST /scan 而非 GET /candidates；持久层是 settings.json 而非 .env）；② plan 08「真实 Kimi」口径改为 MiniMax；③ 审查报告 15 findings 逐条标注修复 commit。
