@@ -643,7 +643,7 @@ async def _build_detail_response(
                 from aipulse.repositories.followed_up_repo import (
                     SqlAlchemyFollowedUpRepository,
                 )
-                SqlAlchemyFollowedUpRepository(session).update(
+                await SqlAlchemyFollowedUpRepository(session).update(
                     record.id, config=config
                 )
                 await session.commit()
