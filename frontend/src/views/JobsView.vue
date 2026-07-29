@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
 import {
   summarizeFuncPath,
@@ -89,11 +90,12 @@ onMounted(load)
       <li v-for="view in jobs" :key="view.job.id" class="job-row" data-testid="job-row">
         <div class="job-row__head">
           <span class="job-row__name">{{ view.job.name }}</span>
-          <span
-            class="job-row__trigger"
+          <StatusBadge
+            tone="neutral"
+            :label="view.triggerLabel"
             :data-testid="`job-trigger-${view.job.id}`"
             :title="view.job.trigger"
-          >{{ view.triggerLabel }}</span>
+          />
         </div>
         <span
           class="job-row__func"
@@ -159,17 +161,6 @@ onMounted(load)
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.job-row__trigger {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-bg);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-  font-family: var(--font-body);
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 .job-row__func {
   font-size: 12px;

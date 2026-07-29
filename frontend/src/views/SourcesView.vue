@@ -9,6 +9,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
 import {
   summarizeClassPath,
@@ -93,12 +94,10 @@ onMounted(load)
       <li v-for="view in sources" :key="view.source.id" class="source-card" data-testid="source-card">
         <div class="source-card__row">
           <span class="source-card__name">{{ view.source.name }}</span>
-          <span
-            class="source-card__badge"
-            :class="{ 'source-card__badge--off': !view.source.is_active }"
-          >
-            {{ view.source.is_active ? '启用' : '停用' }}
-          </span>
+          <StatusBadge
+            :tone="view.source.is_active ? 'success' : 'neutral'"
+            :label="view.source.is_active ? '启用' : '停用'"
+          />
         </div>
         <dl class="source-card__meta">
           <dt>类型</dt><dd>{{ view.source.source_type }}</dd>
@@ -175,18 +174,6 @@ onMounted(load)
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.source-card__badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--status-green) 20%, transparent);
-  color: var(--status-green);
-  flex-shrink: 0;
-}
-.source-card__badge--off {
-  background: color-mix(in srgb, var(--status-red) 20%, transparent);
-  color: var(--status-red);
 }
 .source-card__meta {
   display: grid;

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import SummarizeButton from '../../components/buttons/SummarizeButton.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
+import StatusBadge from '../../components/ui/StatusBadge.vue'
 import { listSummaryJobs, type SummaryJob } from '../../api/summaryJobs'
 import { subscribeSse } from '../../lib/sse-client'
 import { summarizeError } from '../../lib/errorMessage'
@@ -16,6 +17,13 @@ function formatTime(value: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'completed') return 'success'
+  if (status === 'partial' || status === 'timeout') return 'warning'
+  if (status === 'failed') return 'danger'
+  return 'neutral'
 }
 
 const fallbackError = computed(() => summarizeError(errorMessage.value))
@@ -81,7 +89,7 @@ onBeforeUnmount(() => cleanup?.())
           >{{ job.video_id }}</span>
         </div>
         <span class="record-up">{{ job.up_name || '未知 UP 主' }}</span>
-        <span class="status-badge" :data-status="job.status">{{ job.status }}</span>
+        <StatusBadge :tone="statusTone(job.status)" :label="job.status" />
         <time class="record-time" :datetime="job.created_at || undefined">{{ formatTime(job.created_at) }}</time>
         <span class="record-note">{{ job.note_path || '尚未生成笔记' }}</span>
         <SummarizeButton
@@ -104,6 +112,5 @@ onBeforeUnmount(() => cleanup?.())
 .record-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-video, .record-up, .record-time, .record-note { color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-video { font-family: var(--font-mono); font-size: 11px; cursor: help; }
-.status-badge { font-size: 12px; text-transform: capitalize; }
 @media (max-width: 900px) { .record-row { grid-template-columns: 1fr auto; } .record-up, .record-time, .record-note { grid-column: 1; } }
 </style>

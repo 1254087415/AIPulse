@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
+import StatusBadge from '../../components/ui/StatusBadge.vue'
 import { apiFetch } from '../../lib/apiFetch'
 
 interface Hotspot {
@@ -80,7 +81,10 @@ onMounted(load)
         <p v-if="hotspot.summary" class="hotspot-card__summary">{{ hotspot.summary }}</p>
         <div class="hotspot-card__meta">
           <span>{{ hotspot.source_type }}</span>
-          <span>{{ hotspot.importance }}</span>
+          <StatusBadge
+            :tone="hotspot.importance === 'high' ? 'danger' : hotspot.importance === 'medium' ? 'warning' : 'neutral'"
+            :label="hotspot.importance"
+          />
           <span v-if="hotspot.category">{{ hotspot.category }}</span>
           <time>{{ formatTime(hotspot.published_at) }}</time>
         </div>

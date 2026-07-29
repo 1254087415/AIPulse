@@ -9,7 +9,7 @@
  * owns the API calls and the optimistic update flow.
  */
 import { computed } from 'vue'
-import HealthBadge from '../health-badge/HealthBadge.vue'
+import StatusBadge from '../ui/StatusBadge.vue'
 import AppButton from '../ui/AppButton.vue'
 import type { FollowedUp } from '../../api/followedUp'
 
@@ -34,6 +34,11 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 const platformLabel = computed(() => PLATFORM_LABELS[props.followed.platform] ?? props.followed.platform)
 const statusLabel = computed(() => (props.followed.is_active ? '启用' : '已暂停'))
+const healthBadge = computed(() => ({
+  healthy: { label: '健康', tone: 'success' as const },
+  warning: { label: '关注', tone: 'warning' as const },
+  error: { label: '异常', tone: 'danger' as const },
+})[props.followed.health])
 
 const lastCheckedLabel = computed(() => {
   if (!props.followed.last_checked_at) return '尚未扫描'
@@ -71,10 +76,10 @@ const onEdit = (): void => emit('edit', props.followed.id)
       </header>
 
       <div class="follow-card__meta">
-        <span class="follow-card__chip follow-card__chip--platform">{{ platformLabel }}</span>
-        <span class="follow-card__chip follow-card__chip--status">{{ statusLabel }}</span>
+        <StatusBadge tone="warning" :label="platformLabel" />
+        <StatusBadge :tone="followed.is_active ? 'success' : 'neutral'" :label="statusLabel" />
         <slot name="health">
-          <HealthBadge :status="followed.health" compact />
+          <StatusBadge :tone="healthBadge.tone" :label="healthBadge.label" />
         </slot>
       </div>
 
@@ -205,21 +210,6 @@ const onEdit = (): void => emit('edit', props.followed.id)
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.follow-card__chip {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--surface-bg);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.follow-card__chip--platform {
-  background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
-  color: var(--accent-coral);
 }
 
 .follow-card__line {

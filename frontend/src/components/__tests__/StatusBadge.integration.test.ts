@@ -1,0 +1,122 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FollowedUp } from '../../api/followedUp'
+import FollowCard from '../follow-list-panel/FollowCard.vue'
+import StatusBadge from '../ui/StatusBadge.vue'
+import SourcesView from '../../views/SourcesView.vue'
+import JobsView from '../../views/JobsView.vue'
+import DashboardHotspotPanel from '../../views/panels/DashboardHotspotPanel.vue'
+import FollowRecordsPanel from '../../views/panels/FollowRecordsPanel.vue'
+
+const mocks = vi.hoisted(() => ({
+  apiFetch: vi.fn(),
+  listSummaryJobs: vi.fn(),
+}))
+
+vi.mock('../../lib/apiFetch', () => ({ apiFetch: mocks.apiFetch }))
+vi.mock('../../api/summaryJobs', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../api/summaryJobs')>()
+  return { ...original, listSummaryJobs: mocks.listSummaryJobs }
+})
+vi.mock('../../lib/sse-client', () => ({ subscribeSse: () => () => undefined }))
+
+const followed: FollowedUp = {
+  id: 'follow-1',
+  platform: 'bilibili',
+  uid: '517327498',
+  display_name: '测试 UP 主',
+  profile_url: '',
+  collector_strategy: 'uapi',
+  last_cursor_id: null,
+  fetch_interval_minutes: 30,
+  is_active: true,
+  status: 'active',
+  health: 'healthy',
+  last_checked_at: '2026-07-24T03:00:00Z',
+  last_error: null,
+  failed_at: null,
+  created_at: '2026-07-24T03:00:00Z',
+  updated_at: '2026-07-24T03:00:00Z',
+  deleted_at: null,
+}
+
+function mountView(component: Parameters<typeof mount>[0]) {
+  return mount(component, {
+    global: {
+      stubs: {
+        AppButton: true,
+        PageHeader: true,
+        SummarizeButton: true,
+      },
+    },
+  })
+}
+
+describe('StatusBadge integrations', () => {
+  beforeEach(() => {
+    mocks.apiFetch.mockReset()
+    mocks.listSummaryJobs.mockReset()
+  })
+
+  it('uses badges for platform, enabled state, and health on followed cards', () => {
+    const wrapper = mount(FollowCard, { props: { followed } })
+    const badges = wrapper.findAllComponents(StatusBadge)
+
+    expect(badges.map((badge) => badge.text())).toEqual(['B 站', '启用', '健康'])
+    expect(badges.map((badge) => badge.props('tone'))).toEqual(['warning', 'success', 'success'])
+  })
+
+  it('uses a success badge for enabled sources', async () => {
+    mocks.apiFetch.mockResolvedValue({
+      success: true,
+      data: [{
+        id: 'source-1', name: 'B 站', source_type: 'bilibili_up', collector_class: 'Collector',
+        default_weight: 1, fetch_interval_minutes: 30, is_active: true,
+        last_fetched_at: null, last_error: null,
+      }],
+    })
+    const wrapper = mountView(SourcesView)
+    await flushPromises()
+
+    const badge = wrapper.findComponent(StatusBadge)
+    expect(badge.text()).toBe('启用')
+    expect(badge.props('tone')).toBe('success')
+  })
+
+  it('uses warning and danger badges for partial and failed records', async () => {
+    mocks.listSummaryJobs.mockResolvedValue([
+      { id: 'job-1', video_id: 'BV1', title: '部分任务', up_name: 'UP', status: 'partial', error: null, note_path: null, created_at: null },
+      { id: 'job-2', video_id: 'BV2', title: '失败任务', up_name: 'UP', status: 'failed', error: 'error', note_path: null, created_at: null },
+    ])
+    const wrapper = mountView(FollowRecordsPanel)
+    await flushPromises()
+
+    const badges = wrapper.findAllComponents(StatusBadge)
+    expect(badges.map((badge) => badge.props('tone'))).toEqual(['warning', 'danger'])
+  })
+
+  it('uses a warning badge for medium importance', async () => {
+    mocks.apiFetch.mockResolvedValue({
+      success: true,
+      data: [{ id: 'hotspot-1', title: '热点', summary: null, source_type: 'bilibili_up', heat_score: 0, importance: 'medium', category: null, published_at: null }],
+      meta: { total: 1, page: 1, limit: 20 },
+    })
+    const wrapper = mountView(DashboardHotspotPanel)
+    await flushPromises()
+
+    expect(wrapper.findComponent(StatusBadge).props('tone')).toBe('warning')
+  })
+
+  it('uses a neutral badge for scheduled job triggers', async () => {
+    mocks.apiFetch.mockResolvedValue({
+      success: true,
+      data: [{ id: 'scan', name: 'Scan', func: 'aipulse.scan', trigger: 'interval[0:30:00]', next_run_time: null }],
+    })
+    const wrapper = mountView(JobsView)
+    await flushPromises()
+
+    const badge = wrapper.findComponent(StatusBadge)
+    expect(badge.text()).toBe('每 30 分钟')
+    expect(badge.props('tone')).toBe('neutral')
+  })
+})
