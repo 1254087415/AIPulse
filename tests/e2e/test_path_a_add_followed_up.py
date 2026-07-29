@@ -223,14 +223,8 @@ async def test_tc_path_a_03_detail_collections_and_recent_videos(client: AsyncCl
 
     # 触发一次同步，让 orphan_videos 有内容可断言
     sync_data = await _trigger_sync(client, followed_up_id)
-    if sync_data.get("status") == "ok":
-        # 真实 uapis.cn 偶发限流；若一条都没拉到，本条断言 gracefully
-        # 降级（path-a 不应因 B 站风控单独 FAIL，但日志要可见）
-        if sync_data.get("new_videos", 0) == 0:
-            logger.warning(
-                "[path-a] sync returned 0 new_videos (uapis.cn 可能限流)，"
-                "orphan_videos 断言将基于空 list 验证 schema",
-            )
+    sync_status = sync_data.get("status")
+    new_videos = int(sync_data.get("new_videos", 0))
 
     detail_resp = await client.get(
         f"/api/followed-up/by-uid/bilibili/{LI_MU_MID}/detail"
@@ -263,6 +257,41 @@ async def test_tc_path_a_03_detail_collections_and_recent_videos(client: AsyncCl
     assert "items" in videos and "nextOffset" in videos
     assert len(videos["items"]) <= 20
     assert videos["nextOffset"] is None or isinstance(videos["nextOffset"], int)
+
+    # ===== 下界断言（显式分支）=====
+    # sync ok 且 new_videos > 0 时，必须真有视频入库；否则 sync 数据与详情页
+    # 数据流断了（spec §10.3 增量同步硬要求）。
+    if sync_status == "ok" and new_videos > 0:
+        assert len(videos["items"]) >= 1, (
+            f"sync 报告 new_videos={new_videos}，但 /videos items 空 —— "
+            f"详情页与 sync 上报不一致"
+        )
+        # orphan_videos 或 collections 内视频至少有一处非空
+        collections_total = sum(len(c.get("videos", [])) for c in detail["collections"])
+        assert (len(detail["orphan_videos"]) + collections_total) >= 1, (
+            f"sync 报告 new_videos={new_videos}，但 /detail.orphan_videos + "
+            f"collections[].videos 全部为空 —— 详情页渲染不了视频"
+        )
+        # /videos items 与 orphan_videos + collections 的总视频数应一致
+        # （/videos 默认 limit=20 即全集；orphan_videos 同全集）
+        total_via_detail = len(detail["orphan_videos"]) + collections_total
+        assert len(videos["items"]) == total_via_detail, (
+            f"/videos={len(videos['items'])} 与 /detail 汇总={total_via_detail} "
+            f"不一致 —— 详情页 / 分页端点数据源不同步"
+        )
+    else:
+        # sync timeout / 限流返回 0 new_videos：仅做 schema 校验，
+        # 但必须显式分支记录降级原因，不许静默空转。
+        logger.warning(
+            "[path-a-03] 降级为 schema-only：sync_status=%r new_videos=%d "
+            "(B 站风控 / wait_for 超时)；仅断言列表 schema，不强求内容",
+            sync_status, new_videos,
+        )
+        # schema-only 下仍校验 items/nextOffset 类型合法 + 上下界安全
+        assert isinstance(videos["items"], list)
+        assert videos["nextOffset"] is None or isinstance(videos["nextOffset"], int)
+        assert isinstance(detail["orphan_videos"], list)
+        assert isinstance(detail["collections"], list)
 
 
 # --------------------------------------------------------------------
@@ -319,8 +348,14 @@ async def test_tc_path_a_04_manual_sync_grows_hotspot_count(client: AsyncClient)
             f"DB bvids={db_bvids}, sync new_bvids={reported_bvids}"
         )
     else:
-        # timeout：DB count 可未变化（扫描没跑完）
-        assert after_count >= 0
+        # sync timeout（wait_for 15s 取消）：扫描可能没跑完，hotspot 数允许
+        # 不增长；但语义上 hotspot 数不能倒退（增量同步保证）：
+        # 删除 UP 主走 DELETE，软删除置 deleted_at，不会回写 hotspot；
+        # 若 after_count < before_count 说明有路径偷偷 DELETE hotspot —— bug。
+        assert after_count >= before_count, (
+            f"sync timeout 后 hotspot 数从 {before_count} 跌到 {after_count}，"
+            f"增量同步语义被破坏"
+        )
 
     # health 端点反映同步已被调度过
     health_resp = await client.get(
