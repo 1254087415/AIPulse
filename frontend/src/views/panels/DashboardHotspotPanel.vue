@@ -73,38 +73,44 @@ onMounted(load)
     />
 
     <ul v-else class="hotspot-list" data-testid="hotspot-list">
-      <li v-for="hotspot in hotspots" :key="hotspot.id" class="hotspot-card">
-        <div class="hotspot-card__header">
-          <h3>{{ hotspot.title }}</h3>
-          <span
-            v-if="hotspot.heat_score > 0"
-            class="hotspot-card__score"
-            data-testid="hotspot-score"
-          >热度 {{ hotspot.heat_score.toFixed(1) }}</span>
-        </div>
-        <p v-if="hotspot.summary" class="hotspot-card__summary">{{ hotspot.summary }}</p>
-        <div class="hotspot-card__meta">
-          <span class="hotspot-card__tag" data-testid="hotspot-source">
-            {{ formatSourceLabel(hotspot.source_type) }}
-          </span>
-          <StatusBadge
-            :tone="hotspot.importance === 'high' ? 'danger' : hotspot.importance === 'medium' ? 'warning' : 'neutral'"
-            :label="formatImportanceLabel(hotspot.importance)"
-            data-testid="hotspot-importance"
-          />
-          <span
-            v-if="hotspot.category"
-            class="hotspot-card__tag"
-            data-testid="hotspot-category"
-          >{{ hotspot.category }}</span>
-          <time
-            class="hotspot-card__tag"
-            data-testid="hotspot-published"
-            :datetime="hotspot.published_at ?? undefined"
-          >
-            {{ formatDateTime(hotspot.published_at) }}
-          </time>
-        </div>
+      <li v-for="hotspot in hotspots" :key="hotspot.id" class="hotspot-card-wrap">
+        <RouterLink
+          :to="`/hotspot/${encodeURIComponent(hotspot.id)}`"
+          class="hotspot-card"
+          :data-testid="`hotspot-card-${hotspot.id}`"
+        >
+          <div class="hotspot-card__header">
+            <h3 class="hotspot-card__title">{{ hotspot.title }}</h3>
+            <span
+              v-if="hotspot.heat_score > 0"
+              class="hotspot-card__score"
+              data-testid="hotspot-score"
+            >热度 {{ hotspot.heat_score.toFixed(1) }}</span>
+          </div>
+          <p v-if="hotspot.summary" class="hotspot-card__summary">{{ hotspot.summary }}</p>
+          <div class="hotspot-card__meta">
+            <span class="hotspot-card__tag" data-testid="hotspot-source">
+              {{ formatSourceLabel(hotspot.source_type) }}
+            </span>
+            <StatusBadge
+              :tone="hotspot.importance === 'high' ? 'danger' : hotspot.importance === 'medium' ? 'warning' : 'neutral'"
+              :label="formatImportanceLabel(hotspot.importance)"
+              data-testid="hotspot-importance"
+            />
+            <span
+              v-if="hotspot.category"
+              class="hotspot-card__tag"
+              data-testid="hotspot-category"
+            >{{ hotspot.category }}</span>
+            <time
+              class="hotspot-card__tag"
+              data-testid="hotspot-published"
+              :datetime="hotspot.published_at ?? undefined"
+            >
+              {{ formatDateTime(hotspot.published_at) }}
+            </time>
+          </div>
+        </RouterLink>
       </li>
     </ul>
   </section>
@@ -157,16 +163,53 @@ onMounted(load)
   list-style: none;
 }
 
+.hotspot-card-wrap {
+  display: flex;
+}
+
 .hotspot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
   padding: 14px;
   background: var(--surface-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+}
+
+.hotspot-card:hover,
+.hotspot-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent-coral) 35%, var(--border-subtle));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.hotspot-card:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--surface-elevated),
+    0 0 0 4px var(--accent-coral);
 }
 
 .hotspot-card__header {
   justify-content: space-between;
   gap: 12px;
+}
+
+.hotspot-card__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .hotspot-card h3 {
