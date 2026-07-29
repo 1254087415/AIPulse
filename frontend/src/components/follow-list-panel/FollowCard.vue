@@ -90,6 +90,7 @@ const onEdit = (): void => emit('edit', props.followed.id)
         :alt="followed.display_name"
         class="follow-card__avatar-img"
         loading="lazy"
+        referrerpolicy="no-referrer"
         @error="onAvatarError"
       />
       <span class="follow-card__avatar-initial">{{ avatarInitial }}</span>
