@@ -106,7 +106,7 @@ describe('StatusBadge integrations', () => {
   it('uses a warning badge for medium importance', async () => {
     mocks.apiFetch.mockResolvedValue({
       success: true,
-      data: [{ id: 'hotspot-1', title: '热点', summary: null, source_type: 'bilibili_up', heat_score: 0, importance: 'medium', category: null, published_at: '2026-07-24T11:05:00' }],
+      data: [{ id: 'hotspot-1', title: '热点', summary: null, source_type: 'bilibili_up', heat_score: 0, importance: 'medium', category: '模型发布', published_at: '2026-07-24T11:05:00' }],
       meta: { total: 1, page: 1, limit: 20 },
     })
     const wrapper = mountView(DashboardHotspotPanel)
@@ -115,7 +115,13 @@ describe('StatusBadge integrations', () => {
     const badge = wrapper.findComponent(StatusBadge)
     expect(badge.props('tone')).toBe('warning')
     expect(badge.text()).toBe('中')
-    expect(wrapper.text()).toContain('2026-07-24 11:05')
+    expect(wrapper.find('[data-testid="hotspot-source"]').text()).toBe('B 站 UP 主')
+    expect(wrapper.find('[data-testid="hotspot-category"]').text()).toBe('模型发布')
+    const published = wrapper.find('[data-testid="hotspot-published"]')
+    expect(published.text()).toBe('2026-07-24 11:05')
+    expect(published.attributes('datetime')).toBe('2026-07-24T11:05:00')
+    expect(wrapper.find('[data-testid="hotspot-score"]').exists()).toBe(false)
+    expect(wrapper.findAll('.hotspot-card__tag')).toHaveLength(3)
   })
 
   it('uses a neutral badge for scheduled job triggers', async () => {

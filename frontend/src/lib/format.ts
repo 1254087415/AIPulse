@@ -25,6 +25,12 @@ const IMPORTANCE_LABELS: Readonly<Record<string, string>> = {
   low: '低',
 }
 
+const SOURCE_LABELS: Readonly<Record<string, string>> = {
+  bilibili_up: 'B 站 UP 主',
+  arxiv: 'arXiv',
+  rss: 'RSS',
+}
+
 const JOB_NAME_LABELS: Readonly<Record<string, string>> = {
   'Scan all enabled followed UP主': '扫描全部已启用 UP 主',
   sync_all_sources: '同步全部来源',
@@ -69,6 +75,10 @@ export function formatStatusLabel(status: string | null | undefined): string {
 
 export function formatImportanceLabel(importance: string): string {
   return IMPORTANCE_LABELS[importance.toLowerCase()] ?? importance
+}
+
+export function formatSourceLabel(source: string): string {
+  return SOURCE_LABELS[source.toLowerCase()] ?? source
 }
 
 export function formatJobName(name: string): string {

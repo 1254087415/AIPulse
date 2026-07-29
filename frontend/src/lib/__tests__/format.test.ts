@@ -4,6 +4,7 @@ import {
   formatImportanceLabel,
   formatInterval,
   formatJobName,
+  formatSourceLabel,
   formatStatusLabel,
 } from '../format'
 
@@ -61,6 +62,18 @@ describe('display labels', () => {
     ['low', '低'],
   ])('translates importance %s', (importance, label) => {
     expect(formatImportanceLabel(importance)).toBe(label)
+  })
+
+  it.each([
+    ['bilibili_up', 'B 站 UP 主'],
+    ['arxiv', 'arXiv'],
+    ['rss', 'RSS'],
+  ])('translates source %s', (source, label) => {
+    expect(formatSourceLabel(source)).toBe(label)
+  })
+
+  it('keeps unknown source labels intact', () => {
+    expect(formatSourceLabel('wechat_mp')).toBe('wechat_mp')
   })
 
   it.each([

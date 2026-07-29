@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import { apiFetch } from '../../lib/apiFetch'
-import { formatDateTime, formatImportanceLabel } from '../../lib/format'
+import { formatDateTime, formatImportanceLabel, formatSourceLabel } from '../../lib/format'
 
 interface Hotspot {
   id: string
@@ -71,17 +71,34 @@ onMounted(load)
       <li v-for="hotspot in hotspots" :key="hotspot.id" class="hotspot-card">
         <div class="hotspot-card__header">
           <h3>{{ hotspot.title }}</h3>
-          <span class="hotspot-card__score">热度 {{ hotspot.heat_score.toFixed(1) }}</span>
+          <span
+            v-if="hotspot.heat_score > 0"
+            class="hotspot-card__score"
+            data-testid="hotspot-score"
+          >热度 {{ hotspot.heat_score.toFixed(1) }}</span>
         </div>
         <p v-if="hotspot.summary" class="hotspot-card__summary">{{ hotspot.summary }}</p>
         <div class="hotspot-card__meta">
-          <span>{{ hotspot.source_type }}</span>
+          <span class="hotspot-card__tag" data-testid="hotspot-source">
+            {{ formatSourceLabel(hotspot.source_type) }}
+          </span>
           <StatusBadge
             :tone="hotspot.importance === 'high' ? 'danger' : hotspot.importance === 'medium' ? 'warning' : 'neutral'"
             :label="formatImportanceLabel(hotspot.importance)"
+            data-testid="hotspot-importance"
           />
-          <span v-if="hotspot.category">{{ hotspot.category }}</span>
-          <time>{{ formatDateTime(hotspot.published_at) }}</time>
+          <span
+            v-if="hotspot.category"
+            class="hotspot-card__tag"
+            data-testid="hotspot-category"
+          >{{ hotspot.category }}</span>
+          <time
+            class="hotspot-card__tag"
+            data-testid="hotspot-published"
+            :datetime="hotspot.published_at ?? undefined"
+          >
+            {{ formatDateTime(hotspot.published_at) }}
+          </time>
         </div>
       </li>
     </ul>
@@ -163,5 +180,18 @@ onMounted(load)
   gap: 8px;
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.hotspot-card__tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-bg);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  white-space: nowrap;
 }
 </style>
