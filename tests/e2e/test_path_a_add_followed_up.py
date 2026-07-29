@@ -117,6 +117,56 @@ async def _trigger_sync(client: AsyncClient, followed_up_id: str) -> dict[str, A
     )
 
 
+async def _paginate_videos(
+    client: AsyncClient,
+    mid: str,
+    *,
+    page_size: int = 20,
+    max_pages: int = 50,
+) -> list[dict[str, Any]]:
+    """Paginate ``GET /api/followed-up/by-uid/bilibili/<mid>/videos`` via ``nextOffset``.
+
+    之所以必要：spec 09 §2.4 TC-UI-FOLLOW-DETAIL-05/06 要求详情页支持「加载更多
+    历史」翻页；当该 UP 主真实视频总数 > ``page_size`` 时（2026-07-29 实测
+    李沐 1567748478 已有 22 条），单页 ``len(items) == total`` 断言必破。
+
+    安全护栏：``max_pages=50`` × ``page_size=20`` ≈ 1000 行上限，避免 DB
+    异常巨大或接口 bug 触发的死循环；/detail 端 LIMIT 500 与之同档。
+    """
+    all_items: list[dict[str, Any]] = []
+    offset: int | None = 0  # 第一次 GET 不带 offset 也行，但显式传更直观
+    for page_idx in range(max_pages):
+        params: dict[str, Any] = {"limit": page_size}
+        if offset is not None:
+            params["offset"] = offset
+        resp = await client.get(
+            f"/api/followed-up/by-uid/bilibili/{mid}/videos",
+            params=params,
+        )
+        assert resp.status_code == 200, (
+            f"/videos page {page_idx} returned {resp.status_code}: {resp.text}"
+        )
+        data = resp.json()["data"]
+        items = data.get("items", [])
+        assert isinstance(items, list), f"items must be list, got {type(items)}"
+        # 边界断言：单页 items 必须满足 <= page_size
+        assert len(items) <= page_size, (
+            f"/videos page {page_idx} returned {len(items)} > page_size={page_size}"
+        )
+        all_items.extend(items)
+        next_offset = data.get("nextOffset")
+        if next_offset is None:
+            return all_items
+        assert isinstance(next_offset, int), (
+            f"nextOffset must be int or None, got {type(next_offset)}: {next_offset!r}"
+        )
+        offset = next_offset
+    raise AssertionError(
+        f"_paginate_videos hit max_pages={max_pages}; aborted to avoid runaway. "
+        f"collected={len(all_items)} mid={mid}"
+    )
+
+
 async def _count_hotspots_for_mid(mid: str) -> int:
     """Count Hotspot rows associated with the active FollowedUp for `mid`."""
 
@@ -247,51 +297,63 @@ async def test_tc_path_a_03_detail_collections_and_recent_videos(client: AsyncCl
             "pending", "worth_learning", "worth_notified", "skipped", "failed"
         }
 
-    # /videos 分页：items<=limit=20 + nextOffset 合法
-    videos_resp = await client.get(
-        f"/api/followed-up/by-uid/bilibili/{LI_MU_MID}/videos",
-        params={"limit": 20},
-    )
-    assert videos_resp.status_code == 200, videos_resp.text
-    videos = videos_resp.json()["data"]
-    assert "items" in videos and "nextOffset" in videos
-    assert len(videos["items"]) <= 20
-    assert videos["nextOffset"] is None or isinstance(videos["nextOffset"], int)
+    # /videos 全量分页：循环拉取直到 nextOffset == None，模拟前端「加载更多
+    # 历史」行为 —— **不分页就会漏数据**。被比较的总视频数可能 > 20
+    # （2026-07-29 实测李沐 22 条），单页 ≤ 20 → 旧断言
+    # ``len(videos["items"]) == total_via_detail`` 必然 20 != 22 失败。
+    all_videos = await _paginate_videos(client, LI_MU_MID, page_size=20)
 
-    # ===== 下界断言（显式分支）=====
-    # sync ok 且 new_videos > 0 时，必须真有视频入库；否则 sync 数据与详情页
-    # 数据流断了（spec §10.3 增量同步硬要求）。
-    if sync_status == "ok" and new_videos > 0:
-        assert len(videos["items"]) >= 1, (
-            f"sync 报告 new_videos={new_videos}，但 /videos items 空 —— "
-            f"详情页与 sync 上报不一致"
+    collections_total = sum(len(c.get("videos", [])) for c in detail["collections"])
+    total_via_detail = len(detail["orphan_videos"]) + collections_total
+
+    # ===== 三态分支 =====
+    if total_via_detail > 0:
+        # 强契约：DB 有数据时，分页端点必须能凑齐 /detail 汇总的行数
+        # （覆盖 +20 场景；同时验证 nextOffset 翻页链不断）。
+        assert len(all_videos) == total_via_detail, (
+            f"/videos 全量分页累计={len(all_videos)} 与 /detail 汇总={total_via_detail} "
+            f"不一致 —— 分页 nextOffset 链可能在中途断"
         )
-        # orphan_videos 或 collections 内视频至少有一处非空
-        collections_total = sum(len(c.get("videos", [])) for c in detail["collections"])
-        assert (len(detail["orphan_videos"]) + collections_total) >= 1, (
-            f"sync 报告 new_videos={new_videos}，但 /detail.orphan_videos + "
-            f"collections[].videos 全部为空 —— 详情页渲染不了视频"
-        )
-        # /videos items 与 orphan_videos + collections 的总视频数应一致
-        # （/videos 默认 limit=20 即全集；orphan_videos 同全集）
-        total_via_detail = len(detail["orphan_videos"]) + collections_total
-        assert len(videos["items"]) == total_via_detail, (
-            f"/videos={len(videos['items'])} 与 /detail 汇总={total_via_detail} "
-            f"不一致 —— 详情页 / 分页端点数据源不同步"
-        )
+        # 增量同步硬要求：sync 报告了 new_videos > 0，但 DB 计数为 0 是错。
+        # 注意：``total_via_detail > 0`` 已说明 DB 里有数据；``new_videos > 0``
+        # 只是说明 *本次 sync* 增量了几条。两者必须自洽：sync 有增量但 /videos
+        # 没新增才会破。
+        if sync_status == "ok" and new_videos > 0:
+            logger.info(
+                "[path-a-03] sync_status=ok new_videos=%d total_via_detail=%d",
+                new_videos, total_via_detail,
+            )
     else:
-        # sync timeout / 限流返回 0 new_videos：仅做 schema 校验，
-        # 但必须显式分支记录降级原因，不许静默空转。
+        # DB 完全无视频（``total_via_detail == 0``）—— 只有 sync 真成功但
+        # 返回 0 new_videos 才合理；否则应当 fail（不是悄悄通过）。
+        if sync_status == "ok" and new_videos > 0:
+            raise AssertionError(
+                f"sync 报告 new_videos={new_videos}，但 /detail + /videos 全量 "
+                f"分页都为 0 —— data flow 断裂"
+            )
+        # sync timeout / 限流 / 全新 + 风控 全 0 ：降级 schema-only 校验
         logger.warning(
             "[path-a-03] 降级为 schema-only：sync_status=%r new_videos=%d "
-            "(B 站风控 / wait_for 超时)；仅断言列表 schema，不强求内容",
+            f"total_via_detail={total_via_detail} (B 站风控 / wait_for 超时 / "
+            f"全新未同步)；仅断言列表 schema",
             sync_status, new_videos,
         )
-        # schema-only 下仍校验 items/nextOffset 类型合法 + 上下界安全
-        assert isinstance(videos["items"], list)
-        assert videos["nextOffset"] is None or isinstance(videos["nextOffset"], int)
-        assert isinstance(detail["orphan_videos"], list)
-        assert isinstance(detail["collections"], list)
+
+    # schema 校验（与数据量无关，恒成立）
+    assert isinstance(detail["orphan_videos"], list)
+    assert isinstance(detail["collections"], list)
+    # /videos 首页 last 页的 ``items`` 列表形态（spec §6.12 / TC-UI-FOLLOW-DETAIL-05）
+    videos_first_page = (
+        await client.get(
+            f"/api/followed-up/by-uid/bilibili/{LI_MU_MID}/videos",
+            params={"limit": 20},
+        )
+    ).json()["data"]
+    assert isinstance(videos_first_page["items"], list)
+    assert len(videos_first_page["items"]) <= 20
+    assert videos_first_page["nextOffset"] is None or isinstance(
+        videos_first_page["nextOffset"], int
+    )
 
 
 # --------------------------------------------------------------------
