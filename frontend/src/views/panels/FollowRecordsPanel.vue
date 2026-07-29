@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import SummarizeButton from '../../components/buttons/SummarizeButton.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import { listSummaryJobs, type SummaryJob } from '../../api/summaryJobs'
 import { subscribeSse } from '../../lib/sse-client'
+import { summarizeError } from '../../lib/errorMessage'
 
 const jobs = ref<SummaryJob[]>([])
 const loading = ref(false)
@@ -16,6 +17,8 @@ function formatTime(value: string | null): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
+
+const fallbackError = computed(() => summarizeError(errorMessage.value))
 
 async function loadJobs(): Promise<void> {
   loading.value = true
@@ -59,15 +62,23 @@ onBeforeUnmount(() => cleanup?.())
       </template>
     </PageHeader>
     <p v-if="loading" class="state-line">正在加载处理记录…</p>
-    <p v-else-if="errorMessage" class="state-line state-error">暂时无法读取处理记录。</p>
+    <p
+      v-else-if="errorMessage"
+      class="state-line state-error"
+      :title="fallbackError.technical ?? fallbackError.summary"
+    >{{ fallbackError.summary }}</p>
     <p v-else-if="jobs.length === 0" class="empty-state" data-testid="empty-state">
       还没有处理记录，稍后扫描到新视频后会显示在这里。
     </p>
     <div v-else class="record-list" role="list">
       <article v-for="job in jobs" :key="job.id" class="record-row" role="listitem">
         <div class="record-main">
-          <strong>{{ job.title || job.video_id }}</strong>
-          <span class="record-video">{{ job.video_id }}</span>
+          <strong :title="job.title || job.video_id">{{ job.title || job.video_id }}</strong>
+          <span
+            class="record-video"
+            :data-testid="`record-video-${job.id}`"
+            :title="job.video_id"
+          >{{ job.video_id }}</span>
         </div>
         <span class="record-up">{{ job.up_name || '未知 UP 主' }}</span>
         <span class="status-badge" :data-status="job.status">{{ job.status }}</span>
@@ -92,6 +103,7 @@ onBeforeUnmount(() => cleanup?.())
 .record-main { display: grid; gap: 3px; min-width: 0; }
 .record-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-video, .record-up, .record-time, .record-note { color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.record-video { font-family: var(--font-mono); font-size: 11px; cursor: help; }
 .status-badge { font-size: 12px; text-transform: capitalize; }
 @media (max-width: 900px) { .record-row { grid-template-columns: 1fr auto; } .record-up, .record-time, .record-note { grid-column: 1; } }
 </style>
