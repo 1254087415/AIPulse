@@ -410,7 +410,7 @@ async def test_e2e_path_e_vault_scan(
     final_secret = persisted_after_roundtrip.get("llm_api_key")
     assert final_secret == persisted_secret, (
         f"[secrets-preserve] masked-roundtrip PATCH should preserve: "
-        f"before={perserved_secret!r}, after={final_secret!r}"
+        f"before={persisted_secret!r}, after={final_secret!r}"
     )
 
     print(
