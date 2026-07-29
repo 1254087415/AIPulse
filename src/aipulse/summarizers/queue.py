@@ -140,6 +140,11 @@ class SummaryJobQueue:
         再让 worker 继续**。但 ``put_nowait`` 一调, worker task 立即
         调度, 它的 mark_started 会开新 session 查 row —— 如果调用方这
         边还没 commit, 跨 connection 看不到, NotFound。
+
+        ⚠️  生产代码应改用 :meth:`enqueue_submission` —— 先
+        ``repo.create()`` + ``session.commit()``, 再投递 submission,
+        避免该 race。本方法保留仅供 ``tests/unit/summarizers/test_queue.py``
+        验证 queue 自身契约。
         """
         await self._ensure_loop_state()
         record = await repo.create(

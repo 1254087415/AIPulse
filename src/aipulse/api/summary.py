@@ -114,19 +114,43 @@ async def enqueue_summary_route(
             if up is not None:
                 up_name = up.display_name
 
-    from aipulse.summarizers.queue import QueueFullError, get_queue
+    from aipulse.summarizers.queue import (
+        JobSubmission,
+        QueueFullError,
+        get_queue,
+    )
 
     queue = get_queue()
     await queue.start()
+
+    # 关键时序: 必须先 ``repo.create()`` + ``session.commit()``, 再
+    # ``queue.enqueue_submission()`` 把已存在的 record id 投进队列。
+    # 旧版用 ``queue.enqueue()``: 它内部还会 ``repo.create()`` 出一条 row,
+    # 紧接着 ``put_nowait`` 触发 worker 调度, 但本次路由 ``session.commit()``
+    # 还在后面 —— worker 立即 mark_started 时该 row 还在路由 session 里
+    # 未 commit, worker 自己的新 session 看不到 → SummaryJobNotFoundError.
+    # 与 ``retry_job_route`` 同款修复模式 (verifier R3 已批准)。
     try:
-        submission = await queue.enqueue(
-            repo,
+        record = await repo.create(
             video_id=video_id,
             title=title or "",
             up_name=up_name or "",
         )
-    except QueueFullError as exc:
+    except Exception as exc:  # noqa: BLE001
         await session.rollback()
+        raise
+    await session.commit()
+    submission = JobSubmission(
+        job_id=record.id,
+        video_id=video_id,
+        title=title or "",
+        up_name=up_name or "",
+    )
+    try:
+        await queue.enqueue_submission(submission)
+    except QueueFullError as exc:
+        # row 已 commit (audit trail 保留), 但 worker 不会处理。spec §5.5
+        # QUEUE_FULL 是 backpressure, 调用方应在 worker 释放后重试。
         raise HTTPException(
             status_code=429,
             detail={
@@ -143,7 +167,7 @@ async def enqueue_summary_route(
             title=title,
             up_name=up_name,
         )
-    await session.commit()
+        await session.commit()
 
     return {
         "success": True,

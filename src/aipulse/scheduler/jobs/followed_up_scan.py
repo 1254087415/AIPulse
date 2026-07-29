@@ -121,7 +121,7 @@ async def enqueue_summaries_for_hotspots(
     from aipulse.repositories.summary_job_repo import (
         SqlAlchemySummaryJobRepository,
     )
-    from aipulse.summarizers.queue import QueueFullError, get_queue
+    from aipulse.summarizers.queue import JobSubmission, QueueFullError, get_queue
 
     enqueued_ids: list[str] = []
     queue = get_queue()
@@ -135,12 +135,25 @@ async def enqueue_summaries_for_hotspots(
         try:
             async with get_session_maker()() as session:
                 repo = SqlAlchemySummaryJobRepository(session)
-                submission = await queue.enqueue(
-                    repo,
+                # 关键时序: 先 create + commit, 再 enqueue_submission 纯投递。
+                # 旧版 queue.enqueue 内部还会 repo.create(), 紧接着 put_nowait
+                # 触发 worker 调度, 但 session.commit() 还在后面 —— worker
+                # 立即 mark_started 时该 row 还在 session 里未 commit, 跨
+                # connection 不可见。与 summary.py enqueue_summary_route 同款
+                # 修复模式 (verifier R3 已批准)。
+                record = await repo.create(
                     video_id=hotspot.content_id,
                     title=hotspot.title or hotspot.content_id,
                     up_name=fu.display_name,
                 )
+                await session.commit()
+                submission = JobSubmission(
+                    job_id=record.id,
+                    video_id=hotspot.content_id,
+                    title=hotspot.title or hotspot.content_id,
+                    up_name=fu.display_name,
+                )
+                await queue.enqueue_submission(submission)
                 if hotspot.id is not None:
                     await repo.annotate(
                         submission.job_id,
@@ -148,7 +161,7 @@ async def enqueue_summaries_for_hotspots(
                         title=hotspot.title,
                         up_name=fu.display_name,
                     )
-                await session.commit()
+                    await session.commit()
                 enqueued_ids.append(submission.job_id)
         except QueueFullError as exc:  # noqa: PERF203
             logger.warning(
