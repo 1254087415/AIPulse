@@ -647,36 +647,93 @@ async def e2e_run(
         assert post_body["data"]["video_id"] == ANCHOR_BVID
 
         # ---- 7. TC-02: Stream SSE; collect events until terminal ----
+        #
+        # SSE 必须有读超时上限 —— 否则 worker 被前轮残留 job 饿死时
+        # ``aiter_lines()`` 永远挂起（verifier 20-25min 才被杀）。5min 留
+        # 充足给真 LLM 调用（spec §5.5 5min 硬超时），并允许 diagnostic
+        # dump 定位污染源。
+        from aipulse.summarizers.queue import get_queue as _get_queue
+
         sse_events: list[dict[str, Any]] = []
         terminal_status: str | None = None
-        async with client.stream(
-            "GET", f"/api/summary/events/{job_id}", headers=_bearer()
-        ) as r:
-            assert r.status_code == 200, f"[TC-02] SSE endpoint returned {r.status_code}"
-            assert r.headers["content-type"].startswith("text/event-stream"), (
-                f"[TC-02] content-type wrong: {r.headers.get('content-type')}"
+        SSE_TIMEOUT_S = 300.0
+        try:
+            async with asyncio.timeout(SSE_TIMEOUT_S):
+                async with client.stream(
+                    "GET", f"/api/summary/events/{job_id}", headers=_bearer()
+                ) as r:
+                    assert r.status_code == 200, (
+                        f"[TC-02] SSE endpoint returned {r.status_code}"
+                    )
+                    assert r.headers["content-type"].startswith("text/event-stream"), (
+                        f"[TC-02] content-type wrong: {r.headers.get('content-type')}"
+                    )
+                    ev_type = ""
+                    async for line in r.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("event:"):
+                            ev_type = line.split(":", 1)[1].strip()
+                            continue
+                        if line.startswith("data:"):
+                            payload_str = line.split(":", 1)[1].strip()
+                            try:
+                                payload = json.loads(payload_str)
+                            except json.JSONDecodeError:
+                                continue
+                            sse_events.append({"event": ev_type, "data": payload})
+                            type_str = payload.get("type") or ""
+                            for terminal in (
+                                "completed", "failed", "partial", "timeout"
+                            ):
+                                if type_str.endswith(f".{terminal}"):
+                                    terminal_status = terminal
+                                    break
+                            if terminal_status:
+                                break
+        except (TimeoutError, asyncio.TimeoutError):
+            # Diagnostic dump — 帮 verifier 看清 queue 是否被污染、job 卡在哪一步
+            _queue = _get_queue()
+            qsize = (
+                _queue._queue.qsize()
+                if _queue._queue is not None
+                else None
             )
-            ev_type = ""
-            async for line in r.aiter_lines():
-                if not line:
-                    continue
-                if line.startswith("event:"):
-                    ev_type = line.split(":", 1)[1].strip()
-                    continue
-                if line.startswith("data:"):
-                    payload_str = line.split(":", 1)[1].strip()
-                    try:
-                        payload = json.loads(payload_str)
-                    except json.JSONDecodeError:
-                        continue
-                    sse_events.append({"event": ev_type, "data": payload})
-                    type_str = payload.get("type") or ""
-                    for terminal in ("completed", "failed", "partial", "timeout"):
-                        if type_str.endswith(f".{terminal}"):
-                            terminal_status = terminal
-                            break
-                    if terminal_status:
-                        break
+            async with get_session_maker()() as s:
+                sj = (
+                    await s.execute(
+                        select(SummaryJob).where(SummaryJob.id == job_id)
+                    )
+                ).scalar_one_or_none()
+                status = sj.status if sj else "NOT_FOUND"
+                error = sj.error if sj else None
+                started = sj.started_at.isoformat() if sj and sj.started_at else None
+                completed = (
+                    sj.completed_at.isoformat() if sj and sj.completed_at else None
+                )
+                n_steps = (
+                    len(sj.intermediate_steps)
+                    if sj and sj.intermediate_steps
+                    else 0
+                )
+            raise AssertionError(
+                f"[TC-02] SSE timeout after {SSE_TIMEOUT_S:.0f}s — worker "
+                f"未推进到 terminal event。\n"
+                f"  job_id       = {job_id}\n"
+                f"  status       = {status}\n"
+                f"  error        = {error!r}\n"
+                f"  started_at   = {started}\n"
+                f"  completed_at = {completed}\n"
+                f"  steps_emitted = {n_steps}\n"
+                f"  queue.qsize  = {qsize}\n"
+                f"  sse_events received = {len(sse_events)}\n"
+                f"  last event types = {[e['event'] for e in sse_events[-5:]]}\n"
+                f"  most likely: 进程级 SummaryJobQueue 被前轮 path A scan "
+                f"残留 job 饿死 → 单 worker 排队跑 LLM 调用、path B job 还没轮到。\n"
+                f"  修复: test_path_a_add_followed_up.py 的 _isolate_summary_enqueue "
+                f"fixture 已 monkeypatch enqueue_summaries_for_hotspots 为 no-op；"
+                f"若仍复发，请检查 path A 是否有其他入口调用了 queue.enqueue。"
+            )
 
         # ---- 8. Pull DB state for assertions (TC-03/04/05/06/07) ----
         async with get_session_maker()() as s:

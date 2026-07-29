@@ -44,6 +44,66 @@ LI_MU_PROFILE_URL = f"https://space.bilibili.com/{LI_MU_MID}"
 
 
 # --------------------------------------------------------------------
+# autouse fixtures — test isolation
+# --------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _isolate_summary_enqueue(monkeypatch: pytest.MonkeyPatch):
+    """Disable auto-summary enqueue triggered by ``POST /api/followed-up/{id}/sync``.
+
+    Why: path A's TC-03 / TC-04 trigger ``_scan_one`` →
+    ``enqueue_summaries_for_hotspots`` which fills the **process-global**
+    ``SummaryJobQueue`` with up to 20 jobs (one per new hotspot).
+    The single worker drains those jobs first, starving path B's job and
+    causing its SSE to hang waiting for the terminal event (verifier 跑了
+    20-25min 才被杀).
+
+    Patch the enqueue function to a no-op so path A stays purely about scan +
+    hotspot upsertion (TC-04's assertion object is the DB ``hotspots`` count,
+    **not** the summary jobs). Path B's fixture owns summary end-to-end.
+
+    Side benefit: scan 本身的真实行为（B 站抓取 + upsert_hotspot_from_video）
+    完全保留；只 strip 出队动作。
+    """
+    from aipulse.scheduler.jobs import followed_up_scan as scan_mod
+
+    async def _no_enqueue(*args: Any, **kwargs: Any) -> list[str]:
+        return []
+
+    monkeypatch.setattr(
+        scan_mod, "enqueue_summaries_for_hotspots", _no_enqueue, raising=True
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
+async def _drain_summary_queue():
+    """Drain any leftover SummaryJobQueue jobs at start AND end of each path A test.
+
+    Path A 修了 enqueue patch，但 worker 可能仍持有上一轮 session 残留 job
+    （process-global singleton）。drain 保证路径 A 测试运行时队列空，
+    不会污染 path B 的下一轮。
+    """
+    from aipulse.summarizers.queue import get_queue, reset_queue_for_tests
+
+    queue = get_queue()
+    try:
+        await queue.stop()
+    except Exception:  # noqa: BLE001
+        pass
+    reset_queue_for_tests()
+    yield
+    # teardown
+    queue = get_queue()
+    try:
+        await queue.stop()
+    except Exception:  # noqa: BLE001
+        pass
+    reset_queue_for_tests()
+
+
+# --------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------
 
