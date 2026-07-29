@@ -76,12 +76,13 @@
 
 **验收**：全页截图核对状态/日期/空态一致性；`pnpm test:unit` + `pnpm build` 绿。
 
-## 7. Loop D「热点卡交互 + 杂项」（M7 + L1 + L3 + L4）
+## 7. Loop D「热点卡交互 + 杂项」（M7 + L1 + L3 + L4 + 挂账 M-1）
 
 - **M7** 热点卡不可点击：`DashboardHotspotPanel.vue` 纯静态 div，但 `HotspotDetailView.vue` 存在且无入口。卡片标题包 `RouterLink`（或整卡可点），补 `cursor: pointer` 与焦点环（a11y）。
 - **L1** 热点卡无 hover（设计 §6.4 上浮 + 加深阴影），与 M7 顺手做。
 - **L3** sidebar 图标散装 unicode（◐/⚙/✎/⌚/✦/☰，语义错位）→ 统一 icon set（lucide 或同级），保持线宽一致。注意控制依赖新增，优先 SVG 内联。
 - **L4** 头像空占位：**先验证 `68ced3c` 修复后是否自愈**（打开任一 UP 详情页触发缓存落盘 → 回关注列表看头像）。未自愈再做 fallback（首字符/默认图标）。
+- **挂账 M-1（Loop A verifier 转入）**：关注列表卡片的「查看详情」router-link 仍是浏览器默认蓝色文字（`FollowListPanel.vue:202-204` class `follow-card__detail-link`），Loop A 未收敛。与本 loop 的热点卡链接化（M7）一并处理：套 ghost 样式或统一链接规范。
 
 **验收**：热点卡可点进详情且路由正确；hover 生效；sidebar 图标风格统一；头像显示真实图或有内容 fallback；`pnpm test:unit` + `pnpm build` 绿 + 路由相关前端测试更新。
 
@@ -91,7 +92,7 @@
 
 顺序：**A → B → C → D**（串行）。每轮 GREEN merge 后在此节打勾：
 
-- [ ] Loop A（H1+M1+H3）— worker 分支 `ui-fix/loop-a-buttons-headers`
+- [x] Loop A（H1+M1+H3）— 分支 `ui-fix/loop-a-buttons-headers`，merge `a942fa6`（verifier GREEN-WITH-WARN，12 页实拍全过；M-1「查看详情」链接转 Loop D；L-1 `--state-*` 上移 tokens.css 留作可选；L-3 提醒：pnpm 11 会写 `packageManager` 字段噪音，worker 勿提交）
 - [ ] Loop B（H2+M3+L5）— worker 分支 `ui-fix/loop-b-error-sanitize`
 - [ ] Loop C（M2+M4+M5+L2+M6）— worker 分支 `ui-fix/loop-c-status-format-empty`
 - [ ] Loop D（M7+L1+L3+L4）— worker 分支 `ui-fix/loop-d-hotspot-card-misc`
