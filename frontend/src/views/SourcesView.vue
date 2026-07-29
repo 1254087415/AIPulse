@@ -8,6 +8,7 @@
  * resolves, the panel renders real data, and console stays clean.
  */
 import { computed, onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
@@ -81,9 +82,11 @@ onMounted(load)
     >
       {{ fallbackError.summary }}
     </p>
-    <p v-else-if="sources.length === 0" class="state-line" data-testid="empty">
-      暂无来源
-    </p>
+    <EmptyState
+      v-else-if="sources.length === 0"
+      title="暂无来源"
+      description="配置内容来源后，采集状态会显示在这里。"
+    />
 
     <ul v-else class="source-list" data-testid="source-list">
       <li v-for="view in sources" :key="view.source.id" class="source-card" data-testid="source-card">

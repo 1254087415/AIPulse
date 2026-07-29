@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import { apiFetch } from '../../lib/apiFetch'
@@ -63,9 +64,13 @@ onMounted(load)
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
       加载失败：{{ errorMessage }}
     </p>
-    <p v-else-if="hotspots.length === 0" class="state-line" data-testid="empty">
-      暂无热点
-    </p>
+    <EmptyState
+      v-else-if="hotspots.length === 0"
+      title="暂无热点"
+      description="添加关注词后，系统会每 30 分钟同步相关内容。"
+      action-label="前往添加关注词"
+      action-href="/keywords"
+    />
 
     <ul v-else class="hotspot-list" data-testid="hotspot-list">
       <li v-for="hotspot in hotspots" :key="hotspot.id" class="hotspot-card">

@@ -6,6 +6,7 @@
  * 真实返回字段：id / name / func / trigger / next_run_time
  */
 import { computed, onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
@@ -77,9 +78,11 @@ onMounted(load)
     >
       {{ fallbackError.summary }}
     </p>
-    <p v-else-if="jobs.length === 0" class="state-line" data-testid="empty">
-      暂无任务
-    </p>
+    <EmptyState
+      v-else-if="jobs.length === 0"
+      title="暂无定时任务"
+      description="调度器注册任务后，运行计划会显示在这里。"
+    />
 
     <ul v-else class="job-list" data-testid="job-list">
       <li v-for="view in jobs" :key="view.job.id" class="job-row" data-testid="job-row">

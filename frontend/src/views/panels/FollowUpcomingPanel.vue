@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import SummarizeButton from '../../components/buttons/SummarizeButton.vue'
 import AppButton from '../../components/ui/AppButton.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import { formatDateTime } from '../../lib/format'
 import { listPendingHotspots, type Hotspot } from '../../api/summaryJobs'
@@ -43,9 +44,11 @@ onMounted(() => void loadHotspots())
     </PageHeader>
     <p v-if="loading" class="state-line">正在加载待学习内容…</p>
     <p v-else-if="errorMessage" class="state-line state-error">暂时无法读取待学习内容。</p>
-    <p v-else-if="hotspots.length === 0" class="empty-state" data-testid="empty-state">
-      当前没有待学习内容。新的关注视频出现后会自动加入这里。
-    </p>
+    <EmptyState
+      v-else-if="hotspots.length === 0"
+      title="暂无待学习内容"
+      description="新的关注视频出现后，会自动加入这里。"
+    />
     <div v-else class="item-list" role="list">
       <article v-for="hotspot in hotspots" :key="hotspot.id" class="item-row" role="listitem">
         <div class="item-copy">
@@ -61,7 +64,7 @@ onMounted(() => void loadHotspots())
 
 <style scoped>
 .follow-panel { padding: 24px; }
-.state-line, .empty-state { padding: 24px; color: var(--text-secondary); background: var(--surface-elevated); border: 1px dashed var(--border-subtle); border-radius: var(--radius-md); }
+.state-line { padding: 24px; color: var(--text-secondary); background: var(--surface-elevated); border: 1px dashed var(--border-subtle); border-radius: var(--radius-md); }
 .state-error { color: var(--status-red); }
 .item-list { display: grid; gap: 8px; }
 .item-row { display: grid; grid-template-columns: 1fr 180px auto; gap: 16px; align-items: center; padding: 16px; background: var(--surface-elevated); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }

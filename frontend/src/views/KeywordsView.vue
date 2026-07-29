@@ -7,6 +7,7 @@
  * stays clean.
  */
 import { onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
 import { formatDateTime } from '../lib/format'
@@ -47,9 +48,11 @@ onMounted(load)
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
       加载失败：{{ errorMessage }}
     </p>
-    <p v-else-if="keywords.length === 0" class="state-line" data-testid="empty">
-      暂无关键词
-    </p>
+    <EmptyState
+      v-else-if="keywords.length === 0"
+      title="暂无关键词"
+      description="添加关键词后，AIPulse 会按关注方向筛选内容。"
+    />
 
     <ul v-else class="keyword-list" data-testid="keyword-list">
       <li v-for="kw in keywords" :key="kw.id" class="keyword-row">
