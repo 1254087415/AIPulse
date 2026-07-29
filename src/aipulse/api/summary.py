@@ -210,8 +210,15 @@ async def retry_job_route(
     queue = get_queue()
     await queue.start()
 
-    # 复用 enqueue，但先直接复用 record 已经是 queued state →
-    # 我们手动写一条新 row + push 到 queue
+    # 关键时序: 必须 **先 commit 再 enqueue_submission**。不能用
+    # ``queue.enqueue`` 因为它内部会再 ``repo.create()`` 出一条 row,
+    # worker 立即拿到 submission 去 mark_started 时, 该 row 还在路由
+    # session 里未 commit, worker 自己的新 session 跨 connection 看不到
+    # → SummaryJobNotFoundError (路径 C v0.3 E2E 已踩到)。
+    # 修法: 调用方自己 ``repo.create()`` + ``session.commit()``,
+    # 然后 ``enqueue_submission`` 把已存在的 record id 投进队列。
+    from aipulse.summarizers.queue import JobSubmission
+
     repo2 = SqlAlchemySummaryJobRepository(session)
     record = await repo2.create(
         video_id=old.video_id,
@@ -220,16 +227,15 @@ async def retry_job_route(
     )
     if old.hotspot_id:
         await repo2.annotate(record.id, hotspot_id=old.hotspot_id)
-    await session.commit()
+    await session.commit()  # 必须在 enqueue_submission 前 commit
 
-    submission = await queue.enqueue(
-        repo2,
+    submission = JobSubmission(
+        job_id=record.id,
         video_id=old.video_id,
         title=old.title or "",
         up_name=old.up_name or "",
     )
-    # overwrite the job_id with the freshly-created one (queue already used it)
-    # Actually submission.job_id == record.id at this point
+    await queue.enqueue_submission(submission)
     return {
         "success": True,
         "data": {
