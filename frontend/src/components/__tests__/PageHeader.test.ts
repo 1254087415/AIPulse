@@ -59,4 +59,19 @@ describe('PageHeader', () => {
 
     expect(wrapper.find('.page-header__actions').exists()).toBe(false)
   })
+
+  it('renders a subtitle slot instead of the prop when supplied', () => {
+    const wrapper = mount(PageHeader, {
+      props: { title: '关注列表', subtitle: '2 个 UP 主' },
+      slots: {
+        subtitle: '<span data-testid="over-limit-warning">超过 20 个</span>',
+      },
+    })
+
+    expect(wrapper.find('.page-header__subtitle').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="over-limit-warning"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="over-limit-warning"]').text()).toBe('超过 20 个')
+    // The string subtitle prop is not rendered when the slot is used.
+    expect(wrapper.text()).not.toContain('2 个 UP 主')
+  })
 })

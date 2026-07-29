@@ -7,6 +7,7 @@
  * stays clean.
  */
 import { onMounted, ref } from 'vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
 
 interface Keyword {
@@ -45,10 +46,7 @@ onMounted(load)
 
 <template>
   <section class="keywords-view" data-testid="keywords-view">
-    <header class="view-header">
-      <h2 class="view-title">关键词</h2>
-      <p class="view-banner">该视图将在 Phase 7 完整实现（当前仅展示真实列表）</p>
-    </header>
+    <PageHeader title="关键词" subtitle="关注的关键词与权重配置" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
@@ -84,16 +82,6 @@ onMounted(load)
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0 0 16px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;

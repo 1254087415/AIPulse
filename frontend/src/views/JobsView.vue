@@ -6,6 +6,7 @@
  * 真实返回字段：id / name / func / trigger / next_run_time
  */
 import { onMounted, ref } from 'vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
 
 interface ScheduledJob {
@@ -46,10 +47,7 @@ onMounted(load)
 
 <template>
   <section class="jobs-view" data-testid="jobs-view">
-    <header class="view-header">
-      <h2 class="view-title">定时任务</h2>
-      <p class="view-banner">当前为 Phase 1 最小视图（真实调度任务列表）</p>
-    </header>
+    <PageHeader title="定时任务" subtitle="调度器注册的任务与下次运行时间" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
@@ -84,16 +82,6 @@ onMounted(load)
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0 0 16px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;

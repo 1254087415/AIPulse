@@ -8,6 +8,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
 import { safeHref } from '../lib/safeUrl'
 
@@ -65,10 +66,7 @@ watch(() => hotspotId.value, (next) => void load(next))
 
 <template>
   <section class="hotspot-detail-view" data-testid="hotspot-detail-view">
-    <header class="view-header">
-      <h2 class="view-title">热点详情</h2>
-      <p class="view-banner">该视图将在 Phase 4 完整实现（当前仅展示真实数据）</p>
-    </header>
+    <PageHeader title="热点详情" subtitle="单个热点的完整信息" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
@@ -108,16 +106,6 @@ watch(() => hotspotId.value, (next) => void load(next))
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0 0 16px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;

@@ -146,7 +146,7 @@ describe('TasksView', () => {
     })
     await flushPromises()
 
-    const retryButton = wrapper.find('.task-card.failed .retry-button')
+    const retryButton = wrapper.find('[data-testid="retry-task-1"]')
     expect(retryButton.exists()).toBe(true)
     expect(retryButton.text()).toBe('重试')
 
@@ -231,7 +231,7 @@ describe('TasksView', () => {
     })
     await flushPromises()
 
-    await wrapper.find('.task-card.failed .retry-button').trigger('click')
+    await wrapper.find('[data-testid="retry-task-1"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.error-banner').exists()).toBe(true)

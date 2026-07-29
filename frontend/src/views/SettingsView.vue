@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted, onUnmounted } from 'vue'
+import AppButton from '../components/ui/AppButton.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { getSettings, patchSettings, type SettingsResponse } from '../api/settings'
 import { setApiToken } from '../lib/settings-store'
 
@@ -231,7 +233,7 @@ onUnmounted(() => {
 
 <template>
   <div class="settings-container">
-    <h2 class="settings-title">设置</h2>
+    <PageHeader title="设置" subtitle="LLM / Obsidian / 推送 / API 鉴权" />
 
     <p v-if="loadError" class="load-error" data-testid="load-error" role="alert">
       {{ loadError }}
@@ -260,14 +262,15 @@ onUnmounted(() => {
               v-model="settings.llm_api_key"
               :type="getInputType('llm_api_key')"
             />
-            <button
-              type="button"
+            <AppButton
+              size="sm"
+              variant="ghost"
               class="toggle-password"
               data-testid="toggle-llm-api-key"
               @click="togglePassword('llm_api_key')"
             >
               {{ passwordVisible.llm_api_key ? '隐藏' : '显示' }}
-            </button>
+            </AppButton>
           </div>
 
           <label for="llm-base-url">Base URL</label>
@@ -295,14 +298,14 @@ onUnmounted(() => {
           <label for="obsidian-vault-path">Vault 路径</label>
           <div class="vault-path-row">
             <input id="obsidian-vault-path" v-model="settings.obsidian_vault_path" type="text" />
-            <button
-              type="button"
-              class="vault-picker-btn"
+            <AppButton
+              variant="secondary"
+              size="sm"
               data-testid="pick-obsidian-vault"
               @click="pickObsidianVault"
             >
               选择目录
-            </button>
+            </AppButton>
           </div>
           <p
             v-if="vaultPickerMessage"
@@ -346,14 +349,15 @@ onUnmounted(() => {
               v-model="settings.feishu_secret"
               :type="getInputType('feishu_secret')"
             />
-            <button
-              type="button"
+            <AppButton
+              size="sm"
+              variant="ghost"
               class="toggle-password"
               data-testid="toggle-feishu-secret"
               @click="togglePassword('feishu_secret')"
             >
               {{ passwordVisible.feishu_secret ? '隐藏' : '显示' }}
-            </button>
+            </AppButton>
           </div>
         </div>
       </div>
@@ -382,14 +386,15 @@ onUnmounted(() => {
               v-model="settings.wechat_appsecret"
               :type="getInputType('wechat_appsecret')"
             />
-            <button
-              type="button"
+            <AppButton
+              size="sm"
+              variant="ghost"
               class="toggle-password"
               data-testid="toggle-wechat-appsecret"
               @click="togglePassword('wechat_appsecret')"
             >
               {{ passwordVisible.wechat_appsecret ? '隐藏' : '显示' }}
-            </button>
+            </AppButton>
           </div>
 
           <label for="wechat-template-id">Template ID</label>
@@ -422,14 +427,15 @@ onUnmounted(() => {
               :type="getInputType('aipulse_api_token')"
               placeholder="留空表示不启用 Bearer 鉴权"
             />
-            <button
-              type="button"
+            <AppButton
+              size="sm"
+              variant="ghost"
               class="toggle-password"
               data-testid="toggle-aipulse-api-token"
               @click="togglePassword('aipulse_api_token')"
             >
               {{ passwordVisible.aipulse_api_token ? '隐藏' : '显示' }}
-            </button>
+            </AppButton>
           </div>
           <p class="panel-hint" data-testid="aipulse-token-hint">
             配置后所有 <code>/api/*</code> 请求必须携带 <code>Authorization: Bearer &lt;token&gt;</code>。
@@ -440,14 +446,15 @@ onUnmounted(() => {
     </div>
 
       <div class="actions">
-        <button
+        <AppButton
           type="submit"
-          class="save-button"
+          variant="primary"
+          block
+          :loading="saving"
           data-testid="save-button"
-          :disabled="saving"
         >
           {{ saving ? '保存中...' : saved ? '已保存' : '保存' }}
-        </button>
+        </AppButton>
         <p v-if="errorMessage" class="error-message" data-testid="save-error">
           {{ errorMessage }}
         </p>
@@ -462,22 +469,15 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  padding: 20px 20px 0;
 }
 
 .settings-form {
   display: contents;
 }
 
-.settings-title {
-  margin: 0;
-  padding: 20px 20px 12px;
-  font-size: var(--text-xl);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
 .load-error {
-  margin: 0 20px 12px;
+  margin: 0 0 12px;
   padding: 10px 12px;
   background: color-mix(in srgb, var(--status-red) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--status-red) 30%, transparent);
@@ -489,7 +489,7 @@ onUnmounted(() => {
 .scrollable-content {
   flex: 1;
   overflow-y: auto;
-  padding: 0 20px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -572,57 +572,28 @@ input:focus {
 }
 
 .password-field input {
-  padding-right: 44px;
+  padding-right: 80px;
 }
 
 .toggle-password {
   position: absolute;
-  right: 8px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  padding: 4px 6px;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  cursor: pointer;
 }
 
-.toggle-password:hover {
-  color: var(--text-primary);
+.vault-path-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vault-path-row input {
+  flex: 1;
 }
 
 .actions {
-  padding: 12px 20px 20px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-bg);
-}
-
-.save-button {
-  width: 100%;
-  height: 40px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--accent-coral);
-  border-radius: var(--radius-sm);
-  color: var(--accent-coral);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.1s ease, color 0.1s ease, transform 0.1s ease;
-}
-
-.save-button:hover:not(:disabled) {
-  background: var(--accent-coral);
-  color: var(--surface-bg);
-}
-
-.save-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.save-button:active:not(:disabled) {
-  transform: scale(0.98);
+  padding: 12px 0 20px;
 }
 
 .error-message {
@@ -649,13 +620,8 @@ input:focus {
 @media (prefers-reduced-motion: reduce) {
   .panel-icon,
   .panel-body,
-  .save-button,
   input {
     transition: none;
-  }
-
-  .save-button:active:not(:disabled) {
-    transform: none;
   }
 }
 </style>

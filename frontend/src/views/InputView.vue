@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import AppButton from '../components/ui/AppButton.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
@@ -188,13 +189,16 @@ onUnmounted(() => {
         @keydown.enter="handleSubmit"
       />
 
-      <button
+      <AppButton
+        block
+        variant="primary"
         class="submit-button"
-        :disabled="!url.trim() || submitting"
+        :loading="submitting"
+        :disabled="!url.trim()"
         @click="handleSubmit"
       >
         {{ submitting ? '提交中...' : '开始处理' }}
-      </button>
+      </AppButton>
 
       <div v-if="progress" class="progress">
         <div class="progress-track">
@@ -308,26 +312,8 @@ onUnmounted(() => {
 }
 
 .submit-button {
-  width: 100%;
   height: 48px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--accent-coral);
-  border-radius: var(--radius-md);
-  color: var(--accent-coral);
   font-size: var(--text-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.submit-button:hover:not(:disabled) {
-  background: var(--status-green);
-  color: var(--surface-bg);
-}
-
-.submit-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .progress {

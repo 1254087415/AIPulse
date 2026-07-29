@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
 import { apiFetch } from '../../lib/apiFetch'
 
 interface Hotspot {
@@ -51,15 +52,16 @@ onMounted(load)
 
 <template>
   <section class="dashboard-hotspot-panel" data-testid="panel-hotspot">
-    <header class="dashboard-hotspot-panel__header">
-      <div>
-        <h2>AI 热点</h2>
-        <p>按发布时间展示最新信号</p>
-      </div>
-      <span v-if="!loading && !errorMessage" class="dashboard-hotspot-panel__count">
-        {{ total }} 条
-      </span>
-    </header>
+    <PageHeader title="AI 热点" subtitle="按发布时间展示最新信号">
+      <template #actions>
+        <span
+          v-if="!loading && !errorMessage"
+          class="dashboard-hotspot-panel__count"
+        >
+          {{ total }} 条
+        </span>
+      </template>
+    </PageHeader>
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
@@ -94,27 +96,15 @@ onMounted(load)
   gap: 16px;
 }
 
-.dashboard-hotspot-panel__header,
 .hotspot-card__header,
 .hotspot-card__meta {
   display: flex;
   align-items: center;
 }
 
-.dashboard-hotspot-panel__header {
-  justify-content: space-between;
-}
-
-.dashboard-hotspot-panel h2,
 .hotspot-card h3 {
   margin: 0;
   color: var(--text-primary);
-}
-
-.dashboard-hotspot-panel__header p {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  font-size: 13px;
 }
 
 .dashboard-hotspot-panel__count,

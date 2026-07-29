@@ -33,7 +33,9 @@ withDefaults(defineProps<Props>(), {
   <header class="page-header">
     <div class="page-header__text">
       <h2 :id="headingId" class="page-header__title">{{ title }}</h2>
-      <p v-if="subtitle" class="page-header__subtitle">{{ subtitle }}</p>
+      <p v-if="subtitle || $slots.subtitle" class="page-header__subtitle">
+        <slot name="subtitle">{{ subtitle }}</slot>
+      </p>
     </div>
     <div v-if="$slots.actions" class="page-header__actions">
       <slot name="actions" />

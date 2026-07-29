@@ -30,6 +30,7 @@ import { followApi } from '../api/follow'
 import VideoListItem from '../components/follow/VideoListItem.vue'
 import CollectionAccordion from '../components/follow/CollectionAccordion.vue'
 import HealthDot from '../components/follow/HealthDot.vue'
+import AppButton from '../components/ui/AppButton.vue'
 import ConfirmModal from '../components/ui/ConfirmModal.vue'
 
 const route = useRoute()
@@ -134,14 +135,15 @@ function onConfirmDelete() {
 
 <template>
   <div class="follow-detail-view" data-testid="follow-detail-view">
-    <button
-      type="button"
-      class="follow-detail-back-btn btn btn-ghost"
+    <AppButton
+      size="sm"
+      variant="ghost"
+      class="follow-detail-back-btn"
       data-testid="back-btn"
       @click="onBack"
     >
       ← 返回
-    </button>
+    </AppButton>
 
     <div
       v-if="isLoading"
@@ -185,35 +187,39 @@ function onConfirmDelete() {
           </div>
         </div>
         <div class="follow-detail-actions">
-          <button
-            type="button"
-            class="btn btn-ghost"
+          <AppButton
+            size="sm"
+            variant="secondary"
+            :loading="scanNowMut.isPending.value"
             data-testid="scan-now-btn"
-            :disabled="scanNowMut.isPending.value"
             @click="onScanNow"
           >
             {{ scanNowMut.isPending.value ? '扫描中…' : '立即扫描' }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-ghost"
+          </AppButton>
+          <AppButton
+            size="sm"
+            variant="secondary"
+            :loading="toggleEnabledMut.isPending.value"
             data-testid="toggle-enabled-btn"
-            :disabled="toggleEnabledMut.isPending.value"
             @click="onToggleEnabled"
           >
             {{ detail.enabled ? '暂停' : '恢复' }}
-          </button>
-          <button type="button" class="btn btn-ghost" data-testid="edit-btn">
+          </AppButton>
+          <AppButton
+            size="sm"
+            variant="secondary"
+            data-testid="edit-btn"
+          >
             编辑
-          </button>
-          <button
-            type="button"
-            class="btn btn-ghost follow-detail-btn--danger"
+          </AppButton>
+          <AppButton
+            size="sm"
+            variant="danger"
             data-testid="delete-btn"
             @click="onOpenDelete"
           >
             删除
-          </button>
+          </AppButton>
         </div>
       </header>
 
@@ -270,16 +276,17 @@ function onConfirmDelete() {
       >
         <h2>
           视频（最近 {{ allVideos.length }} 条）
-          <button
+          <AppButton
             v-if="hasNextPage"
-            type="button"
-            class="btn btn-ghost follow-detail-load-more"
+            size="sm"
+            variant="secondary"
+            class="follow-detail-load-more"
+            :loading="isFetchingNextPage"
             data-testid="load-more-btn"
-            :disabled="isFetchingNextPage"
             @click="onLoadMore"
           >
             {{ isFetchingNextPage ? '加载中…' : '加载更多历史' }}
-          </button>
+          </AppButton>
         </h2>
         <ul class="follow-detail-video-list">
           <VideoListItem
@@ -409,31 +416,6 @@ function onConfirmDelete() {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.btn {
-  height: 32px;
-  padding: 0 12px;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border-subtle, #e5e5e5);
-  background: transparent;
-  color: var(--text-primary, #1a1a1a);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.btn-ghost:hover:not(:disabled) {
-  background: var(--surface-bg, #fafafa);
-}
-
-.follow-detail-btn--danger {
-  color: var(--status-red, #ef4444);
-  border-color: color-mix(in srgb, var(--status-red, #ef4444) 30%, transparent);
 }
 
 .follow-detail-meta.panel {

@@ -8,6 +8,7 @@
  * resolves, the panel renders real data, and console stays clean.
  */
 import { onMounted, ref } from 'vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
 
 interface Source {
@@ -50,10 +51,7 @@ onMounted(load)
 
 <template>
   <section class="sources-view" data-testid="sources-view">
-    <header class="view-header">
-      <h2 class="view-title">来源</h2>
-      <p class="view-banner">该视图将在 Phase 7 完整实现（当前仅展示真实列表）</p>
-    </header>
+    <PageHeader title="来源" subtitle="已配置的内容来源与采集器状态" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
@@ -94,23 +92,10 @@ onMounted(load)
   height: 100%;
   overflow-y: auto;
 }
-.view-header {
-  margin-bottom: 16px;
-}
 .view-title {
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;

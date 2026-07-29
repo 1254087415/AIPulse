@@ -12,6 +12,8 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import AppButton from '../components/ui/AppButton.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
@@ -194,10 +196,7 @@ onUnmounted(() => {
     </section>
 
     <template v-else>
-      <header class="tasks-header">
-        <h2 class="title">{{ PAGE_TITLE }}</h2>
-        <span class="count">{{ tasks.length }} 条</span>
-      </header>
+      <PageHeader :title="PAGE_TITLE" :subtitle="`${tasks.length} 条`" />
 
     <div v-if="loadError || retryError" class="error-banner" role="alert">
       {{ loadError || retryError }}
@@ -235,9 +234,9 @@ onUnmounted(() => {
       </svg>
       <h3 class="empty-title">{{ EMPTY_TITLE }}</h3>
       <p class="empty-hint">{{ EMPTY_HINT }}</p>
-      <button class="goto-input-button" @click="goToInput">
+      <AppButton variant="primary" data-testid="goto-input" @click="goToInput">
         {{ GOTO_INPUT_LABEL }}
-      </button>
+      </AppButton>
     </div>
 
     <ul v-else class="task-list">
@@ -253,14 +252,16 @@ onUnmounted(() => {
             <span class="status-dot" :class="task.status"></span>
             <span class="status-label">{{ statusLabel(task.status) }}</span>
           </span>
-          <button
+          <AppButton
             v-if="task.status === 'failed'"
-            class="retry-button"
-            :disabled="retryingIds.has(task.id)"
+            size="sm"
+            variant="danger"
+            :loading="retryingIds.has(task.id)"
+            :data-testid="`retry-${task.id}`"
             @click="retry(task.id)"
           >
             重试
-          </button>
+          </AppButton>
         </div>
         <p class="task-title">{{ task.title || task.url }}</p>
         <p class="task-source">{{ formatSource(task.url) }}</p>
@@ -331,11 +332,6 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.count {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
 .error-banner {
   margin-bottom: 12px;
   padding: 10px 12px;
@@ -375,23 +371,6 @@ onUnmounted(() => {
   margin: 0;
   font-size: var(--text-sm);
   color: var(--text-secondary);
-}
-
-.goto-input-button {
-  margin-top: 8px;
-  padding: 8px 16px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--accent-coral);
-  border-radius: var(--radius-sm);
-  color: var(--status-green);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.goto-input-button:hover {
-  background: var(--status-green);
-  color: var(--surface-bg);
 }
 
 .task-list {
@@ -515,27 +494,6 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.retry-button {
-  padding: 4px 10px;
-  background: transparent;
-  border: 1px solid var(--status-red);
-  border-radius: var(--radius-sm);
-  color: var(--status-red);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.retry-button:hover:not(:disabled) {
-  background: var(--status-red);
-  color: var(--surface-bg);
-}
-
-.retry-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 @media (prefers-reduced-motion: reduce) {

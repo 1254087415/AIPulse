@@ -10,6 +10,7 @@
  */
 import { computed } from 'vue'
 import HealthBadge from '../health-badge/HealthBadge.vue'
+import AppButton from '../ui/AppButton.vue'
 import type { FollowedUp } from '../../api/followedUp'
 
 interface Props {
@@ -96,30 +97,30 @@ const onEdit = (): void => emit('edit', props.followed.id)
 
     <div class="follow-card__actions">
       <slot name="detail" />
-      <button
-        type="button"
-        class="follow-card__btn"
+      <AppButton
+        size="sm"
+        variant="secondary"
         data-testid="sync-button"
         @click="onSync"
       >
         立即同步
-      </button>
-      <button
-        type="button"
-        class="follow-card__btn"
+      </AppButton>
+      <AppButton
+        size="sm"
+        variant="secondary"
         data-testid="edit-button"
         @click="onEdit"
       >
         编辑
-      </button>
-      <button
-        type="button"
-        class="follow-card__btn follow-card__btn--danger"
+      </AppButton>
+      <AppButton
+        size="sm"
+        variant="danger"
         data-testid="remove-button"
         @click="onRemove"
       >
         删除
-      </button>
+      </AppButton>
     </div>
   </article>
 </template>
@@ -270,32 +271,5 @@ const onEdit = (): void => emit('edit', props.followed.id)
 
 .follow-card__detail-link:hover {
   background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
-}
-.follow-card__btn {
-  appearance: none;
-  background: var(--surface-bg);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
-}
-
-.follow-card__btn:hover {
-  background: var(--surface-elevated-hover);
-  border-color: var(--text-secondary);
-}
-
-.follow-card__btn--danger {
-  color: var(--status-red);
-  border-color: color-mix(in srgb, var(--status-red) 25%, transparent);
-}
-
-.follow-card__btn--danger:hover {
-  background: var(--status-red);
-  color: var(--surface-elevated);
-  border-color: var(--status-red);
 }
 </style>
