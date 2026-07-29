@@ -256,4 +256,34 @@ onMounted(() => {
   flex-direction: column;
   gap: 10px;
 }
+
+/* The 「查看详情」router-link lives in this template (slot into FollowCard),
+   so the link styles must live here too — FollowCard's <style scoped> would
+   not apply. Loop D unified this with the rest of the link/button family
+   (ghost variant on a small AppButton) — previously browser-default blue. */
+.follow-card__detail-link {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-coral);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent-coral);
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.follow-card__detail-link:hover {
+  background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
+  color: var(--accent-coral);
+}
+
+.follow-card__detail-link:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--surface-elevated),
+    0 0 0 4px var(--accent-coral);
+}
 </style>

@@ -8,10 +8,11 @@
  * All mutating actions are emitted up to the parent (the list panel), which
  * owns the API calls and the optimistic update flow.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import AppButton from '../ui/AppButton.vue'
 import { formatDateTime, formatInterval } from '../../lib/format'
+import { summarizeError } from '../../lib/errorMessage'
 import type { FollowedUp } from '../../api/followedUp'
 
 interface Props {
@@ -51,6 +52,30 @@ const avatarInitial = computed(() => {
   return name.slice(0, 1) || '?'
 })
 
+// Avatar URL priority: cached B站 avatar (config.avatar_url, populated by
+// opening the detail page — see backend fix in 68ced3c) → profile_url.
+// profile_url defaults to the user space URL when the user adds the UP, which
+// is not a valid image src; we fall back to the initial letter when image
+// load fails.
+const cachedAvatarUrl = computed<string | null>(() => {
+  const cfg = props.followed.config
+  if (cfg && typeof cfg === 'object' && typeof cfg.avatar_url === 'string') {
+    return cfg.avatar_url
+  }
+  return null
+})
+
+const avatarUrl = computed<string | null>(() => cachedAvatarUrl.value ?? props.followed.profile_url ?? null)
+
+const imageFailed = ref(false)
+const showImage = computed(() => !!avatarUrl.value && !imageFailed.value)
+
+const onAvatarError = (): void => {
+  imageFailed.value = true
+}
+
+const lastErrorSummary = computed(() => summarizeError(props.followed.last_error))
+
 const onRemove = (): void => emit('remove', props.followed.id)
 const onSync = (): void => emit('sync', props.followed.id)
 const onEdit = (): void => emit('edit', props.followed.id)
@@ -60,14 +85,14 @@ const onEdit = (): void => emit('edit', props.followed.id)
   <article class="follow-card" :class="{ 'is-paused': !followed.is_active }">
     <div class="follow-card__avatar" aria-hidden="true">
       <img
-        v-if="followed.profile_url"
-        :src="followed.profile_url"
+        v-if="showImage"
+        :src="avatarUrl ?? ''"
         :alt="followed.display_name"
         class="follow-card__avatar-img"
         loading="lazy"
-        @error="($event.target as HTMLImageElement).style.display = 'none'"
+        @error="onAvatarError"
       />
-      <span v-else class="follow-card__avatar-initial">{{ avatarInitial }}</span>
+      <span class="follow-card__avatar-initial">{{ avatarInitial }}</span>
     </div>
 
     <div class="follow-card__body">
@@ -93,10 +118,11 @@ const onEdit = (): void => emit('edit', props.followed.id)
       <p
         v-if="followed.last_error"
         class="follow-card__error"
+        :title="lastErrorSummary.technical ?? followed.last_error"
         data-testid="last-error"
         role="alert"
       >
-        {{ followed.last_error }}
+        {{ lastErrorSummary.summary }}
       </p>
     </div>
 
@@ -168,12 +194,17 @@ const onEdit = (): void => emit('edit', props.followed.id)
 }
 
 .follow-card__avatar-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  z-index: 1;
 }
 
 .follow-card__avatar-initial {
+  position: relative;
+  z-index: 0;
   font-size: 18px;
 }
 
@@ -240,20 +271,5 @@ const onEdit = (): void => emit('edit', props.followed.id)
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
-}
-
-.follow-card__detail-link {
-  display: inline-block;
-  padding: 6px 12px;
-  border: 1px solid var(--accent-coral);
-  border-radius: var(--radius-sm);
-  color: var(--accent-coral);
-  font-size: 12px;
-  text-align: center;
-  text-decoration: none;
-}
-
-.follow-card__detail-link:hover {
-  background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
 }
 </style>

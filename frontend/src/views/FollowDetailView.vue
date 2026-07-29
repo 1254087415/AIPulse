@@ -33,6 +33,7 @@ import HealthDot from '../components/follow/HealthDot.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import ConfirmModal from '../components/ui/ConfirmModal.vue'
 import { formatDateTime, formatInterval, formatStatusLabel } from '../lib/format'
+import { summarizeError } from '../lib/errorMessage'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,6 +99,8 @@ const lastCheckedText = computed(() => {
   if (!ts) return '尚未扫描'
   return formatDateTime(ts)
 })
+
+const lastErrorSummary = computed(() => summarizeError(detail.value?.last_error))
 
 function onScanNow() {
   if (scanNowMut.isPending.value) return
@@ -249,8 +252,12 @@ function onConfirmDelete() {
           </dd>
           <template v-if="detail.last_error">
             <dt>最近错误</dt>
-            <dd class="follow-detail-state--error follow-detail-last-error">
-              {{ detail.last_error }}
+            <dd
+              class="follow-detail-state--error follow-detail-last-error"
+              data-testid="last-error"
+              :title="lastErrorSummary.technical ?? detail.last_error"
+            >
+              {{ lastErrorSummary.summary }}
             </dd>
           </template>
         </dl>

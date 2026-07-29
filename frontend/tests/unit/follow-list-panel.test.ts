@@ -169,10 +169,34 @@ describe('FollowListPanel', () => {
 
     wrapper.unmount()
   })
+
+  it('renders the 查看详情 router-link with the ghost link style (M-1 挂账)', async () => {
+    listFollowedMock.mockResolvedValue([sampleFollowed()])
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const link = wrapper.find('.follow-card__detail-link')
+    expect(link.exists()).toBe(true)
+    // 链接文本 + 目标 uid
+    expect(link.text().trim()).toBe('查看详情')
+    expect(link.attributes('to')).toBe('/followed-up/1567748478')
+    // inline style 一定不能带浏览器默认蓝色
+    expect(link.attributes('style') ?? '').not.toMatch(/color:\s*(blue|#00f|#0000ff)/i)
+    // 验证 link 携带 FollowListPanel 的 scoped 属性（证明样式由
+    // FollowListPanel 的 <style scoped> 提供，而不是 FollowCard 的）
+    // 旧实现把样式写在 FollowCard 的 scoped 里，但 link 在 FollowListPanel 模板
+    // 中，因此 styles 不生效 → 浏览器默认蓝色 → M-1
+    // Loop D 把样式移到 FollowListPanel：现在 link 必须带 data-v-<hash> 标记。
+    const dataVAttr = Object.keys(link.attributes()).find((k) => k.startsWith('data-v-'))
+    expect(dataVAttr).toBeTruthy()
+
+    wrapper.unmount()
+  })
 })
 
 describe('FollowCard', () => {
-  it('renders the last_error block when present', () => {
+  it('renders the last_error block when present, sanitized via summarizeError', () => {
     const wrapper = mount(FollowCard, {
       props: {
         followed: sampleFollowed({
@@ -182,8 +206,72 @@ describe('FollowCard', () => {
       },
     })
 
-    expect(wrapper.find('[data-testid="last-error"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Bilibili 429 rate limited')
+    const errorBlock = wrapper.find('[data-testid="last-error"]')
+    expect(errorBlock.exists()).toBe(true)
+    // 429 → "请求过于频繁，请稍后重试"；原始 raw 错误收进 title 供查看
+    expect(errorBlock.text()).toContain('请求过于频繁')
+    expect(errorBlock.text()).not.toContain('Bilibili 429 rate limited')
+    expect(errorBlock.attributes('title')).toBe('Bilibili 429 rate limited')
+
+    wrapper.unmount()
+  })
+
+  it('falls back to first-character initial when no profile_url or cached avatar is set', () => {
+    const wrapper = mount(FollowCard, {
+      props: {
+        followed: sampleFollowed({
+          profile_url: '',
+          config: {},
+        }),
+      },
+    })
+
+    expect(wrapper.find('img.follow-card__avatar-img').exists()).toBe(false)
+    const initial = wrapper.find('.follow-card__avatar-initial')
+    expect(initial.exists()).toBe(true)
+    expect(initial.text()).toBe('李')
+
+    wrapper.unmount()
+  })
+
+  it('uses the cached config.avatar_url as the avatar src (L4 self-heal path)', () => {
+    const wrapper = mount(FollowCard, {
+      props: {
+        followed: sampleFollowed({
+          profile_url: 'https://space.bilibili.com/1567748478',
+          config: {
+            avatar_url: 'https://i0.hdslb.com/bfs/face/example.jpg',
+          },
+        }),
+      },
+    })
+
+    const img = wrapper.find('img.follow-card__avatar-img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('https://i0.hdslb.com/bfs/face/example.jpg')
+    // initial letter is still rendered behind the image so it acts as a fallback
+    expect(wrapper.find('.follow-card__avatar-initial').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('falls back to the initial when the avatar image errors (broken URL)', async () => {
+    const wrapper = mount(FollowCard, {
+      props: {
+        followed: sampleFollowed({
+          config: { avatar_url: 'https://example.invalid/broken.jpg' },
+        }),
+      },
+    })
+
+    const img = wrapper.find('img.follow-card__avatar-img')
+    expect(img.exists()).toBe(true)
+    await img.trigger('error')
+    await flushPromises()
+
+    // After error: image is removed from v-if, initial is the only visible content
+    expect(wrapper.find('img.follow-card__avatar-img').exists()).toBe(false)
+    expect(wrapper.find('.follow-card__avatar-initial').text()).toBe('李')
 
     wrapper.unmount()
   })
