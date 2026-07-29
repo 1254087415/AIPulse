@@ -79,28 +79,39 @@ def _isolate_summary_enqueue(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 async def _drain_summary_queue():
-    """Drain any leftover SummaryJobQueue jobs at start AND end of each path A test.
+    """Forcibly cancel any orphan SummaryJobQueue worker from prior test sessions.
 
-    Path A 修了 enqueue patch，但 worker 可能仍持有上一轮 session 残留 job
-    （process-global singleton）。drain 保证路径 A 测试运行时队列空，
-    不会污染 path B 的下一轮。
+    Path A 修了 enqueue patch（autouse ``_isolate_summary_enqueue``），但
+    process-global ``SummaryJobQueue`` singleton 还可能被上一轮 session 残留
+    的 worker 持有 —— 该 worker 持续 polling 旧 asyncio.Queue、跑 LLM 调用，
+    把 path B 的 job 排在后面无限饿（实测 5min+ 超时）。
+
+    简单的 ``queue.stop()`` 不够：内部 ``if self._lock is None: return``
+    早退分支让 stop 在 _lock 已被 prior code 清空时变 no-op，worker 收不到
+    _stop 信号、task 没 cancel。我们必须 reach 进 ``qmod._queue._worker_task``
+    直接 ``task.cancel()`` —— 测试隔离属非常规操作，允许读私有字段。
     """
-    from aipulse.summarizers.queue import get_queue, reset_queue_for_tests
+    from aipulse.summarizers import queue as qmod
 
-    queue = get_queue()
-    try:
-        await queue.stop()
-    except Exception:  # noqa: BLE001
-        pass
-    reset_queue_for_tests()
+    async def _kill_orphan_worker() -> None:
+        singleton = qmod._queue
+        if singleton is None:
+            return
+        task = getattr(singleton, "_worker_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                # swallow: 我们要的是 worker 退出，不是 raise
+                pass
+        # Null singleton —— 下一轮 ``get_queue()`` 重新起新 asyncio.Queue +
+        # 新 worker，从干净状态开始。
+        qmod._queue = None
+
+    await _kill_orphan_worker()
     yield
-    # teardown
-    queue = get_queue()
-    try:
-        await queue.stop()
-    except Exception:  # noqa: BLE001
-        pass
-    reset_queue_for_tests()
+    await _kill_orphan_worker()
 
 
 # --------------------------------------------------------------------

@@ -20,6 +20,7 @@ BV1PbEnzfEP2，spec 02 verifier 已验有 ai-zh 字幕）+ 真实 Obsidian vault
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -443,6 +444,24 @@ async def e2e_run(
     )
 
     # ---- 2. Reset queue (drop any process-global leftover state) ----
+    # 必须 **强制 cancel 旧 worker task**，不能只 drop singleton —— 否则
+    # 旧 worker 持续 polling 旧 asyncio.Queue、跑 LLM 调用，把 path B 的
+    # job 排在后面无限饿。``reset_queue_for_tests()`` 把 ``_lock`` / ``_stop``
+    # 清空导致 ``queue.stop()`` 内部 ``if _lock is None: return`` 早退；
+    # 所以我们 reach 进 singleton 直接 cancel worker task。
+    from aipulse.summarizers import queue as _qmod
+
+    _singleton = _qmod._queue
+    if _singleton is not None:
+        _task = getattr(_singleton, "_worker_task", None)
+        if _task is not None and not _task.done():
+            _task.cancel()
+            try:
+                await _task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        _qmod._queue = None
+    # 二次保险：原 reset_queue_for_tests 也跑一遍，把所有 internal field 清掉。
     await reset_queue_for_tests()
 
     # ---- 2b. Bump Apple Reminders executor_timeout_s to avoid flaky 5s timeout ----
