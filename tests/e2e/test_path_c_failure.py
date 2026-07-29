@@ -213,17 +213,7 @@ async def e2e_run(
     # 跨 test 状态下 conftest autouse 已建了 :memory: engine, 旧 worker
     # 拿着旧 session_maker 引用查不到新 file DB 的 row。
     from aipulse.summarizers.queue import get_queue as _get_queue
-    from aipulse.store.database import (
-        _engine_override,
-        get_engine,
-        reset_db,
-    )
-    from sqlalchemy.ext.asyncio import (
-        async_sessionmaker,
-        AsyncSession,
-        create_async_engine,
-    )
-    from sqlalchemy.pool import StaticPool
+    from aipulse.store.database import get_engine, reset_db
 
     # 0a. 停掉所有残留 worker — 多轮 cancel + wait, 防止 cancel 还在
     # asyncio 调度队列里时新 engine 已就绪、worker 拿到旧 session_maker
@@ -259,26 +249,18 @@ async def e2e_run(
         await asyncio.sleep(0)
     await asyncio.sleep(0.3)
 
-    # 0d. 用 StaticPool + file-based URL 自建 engine, 强制单 connection 共享。
-    # 默认 AsyncAdaptedQueuePool 下 file-based 也会创建新 connection,
-    # aiosqlite 同进程跨 connection 看不到未 commit 数据; StaticPool
-    # 把所有 connection 复用成同一个, 解决这个 race。
+    # 0d. file-based SQLite — conftest 默认 ``:memory:`` + 默认 AsyncAdaptedQueuePool
+    # 会让每 connection 独立 in-memory DB, worker 跨 connection 看不到 enqueue row。
+    # file-based 共享同一磁盘文件 + 默认 pool 即可: commit 写入磁盘后任何新
+    # connection 立即可见。**禁用** StaticPool: 它会把同一 connection 并发分发给
+    # 所有 session, SSE handler 的 deferred 读事务沿用旧 snapshot, 读到 running
+    # 而非 failed, 引入确定性 TC-02 故障 (verifier R3 复审指出)。
     db_file = tmp_path / "path_c_failure.db"
     db_url = f"sqlite+aiosqlite:///{db_file}"
     os.environ["DATABASE_URL"] = db_url
     get_settings.cache_clear()
+    await configure_test_database(get_settings())
 
-    new_engine = create_async_engine(
-        db_url,
-        echo=False,
-        future=True,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    # 关键: 覆写 module-level _engine_override, 让 get_engine() 返我们的新 engine
-    import aipulse.store.database as _dbmod
-
-    _dbmod._engine_override = new_engine
     get_engine.cache_clear()
     get_session_maker.cache_clear()
     await reset_db()  # create tables on file DB
