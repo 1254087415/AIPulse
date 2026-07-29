@@ -211,8 +211,8 @@ onBeforeUnmount(() => {
 }
 
 .summarize-btn--idle {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--text-primary);
+  color: var(--surface-elevated);
 }
 
 .summarize-btn--pending,
