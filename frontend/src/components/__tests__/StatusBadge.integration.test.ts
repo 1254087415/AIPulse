@@ -127,7 +127,7 @@ describe('StatusBadge integrations', () => {
   it('uses a neutral badge for scheduled job triggers', async () => {
     mocks.apiFetch.mockResolvedValue({
       success: true,
-      data: [{ id: 'scan', name: 'sync_all_sources', func: 'aipulse.scan', trigger: 'interval[0:30:00]', next_run_time: '2026-07-24T11:05:00' }],
+      data: [{ id: 'scan', name: 'sync_all_sources', func: 'aipulse.scheduler.jobs.hotspot_sync:sync_all_sources', trigger: 'interval[0:30:00]', next_run_time: '2026-07-24T11:05:00' }],
     })
     const wrapper = mountView(JobsView)
     await flushPromises()
@@ -137,6 +137,7 @@ describe('StatusBadge integrations', () => {
     expect(badge.props('tone')).toBe('neutral')
     expect(wrapper.text()).toContain('同步全部来源')
     expect(wrapper.text()).not.toContain('sync_all_sources')
+    expect(wrapper.get('.job-row__name').attributes('title')).toBe('aipulse.scheduler.jobs.hotspot_sync:sync_all_sources')
     expect(wrapper.text()).toContain('2026-07-24 11:05')
   })
 })

@@ -87,7 +87,9 @@ onMounted(load)
     <ul v-else class="job-list" data-testid="job-list">
       <li v-for="view in jobs" :key="view.job.id" class="job-row" data-testid="job-row">
         <div class="job-row__head">
-          <span class="job-row__name">{{ formatJobName(view.job.name) }}</span>
+          <span class="job-row__name" :title="view.func.technical">
+            {{ formatJobName(view.job.name) }}
+          </span>
           <StatusBadge
             tone="neutral"
             :label="view.triggerLabel"
@@ -95,11 +97,6 @@ onMounted(load)
             :title="view.job.trigger"
           />
         </div>
-        <span
-          class="job-row__func"
-          :data-testid="`job-func-${view.job.id}`"
-          :title="view.func.technical"
-        >{{ view.func.display }}</span>
         <div class="job-row__meta">
           <span class="job-row__time">下次运行：{{ formatDateTime(view.job.next_run_time) }}</span>
         </div>
@@ -159,13 +156,6 @@ onMounted(load)
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-.job-row__func {
-  font-size: 12px;
-  color: var(--text-secondary);
-  word-break: break-all;
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
   cursor: help;
 }
 .job-row__meta {
