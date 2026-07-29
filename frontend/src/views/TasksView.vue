@@ -14,6 +14,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppButton from '../components/ui/AppButton.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
+import { formatStatusLabel } from '../lib/format'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
@@ -41,13 +42,6 @@ const BROWSER_FALLBACK_TITLE = '此页面仅在桌面端 AIPulse 内可用'
 const BROWSER_FALLBACK_DESCRIPTION =
   '“最近任务” 由 Tauri 后端直接驱动（list_tasks / task_progress 事件）。当前在浏览器中打开了 /tasks，因此不会有数据。请回到 dashboard 浏览 v0.3 视图。'
 const BROWSER_FALLBACK_ACTION = '回 dashboard'
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'PENDING',
-  running: 'RUNNING',
-  completed: 'DONE',
-  failed: 'FAILED',
-}
 
 const STACK_OPACITY_INDEX_1 = '0.95'
 const STACK_OPACITY_DEFAULT = '0.9'
@@ -78,7 +72,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 function statusLabel(status: string): string {
-  return STATUS_LABELS[status] || status.toUpperCase()
+  return formatStatusLabel(status)
 }
 
 function formatSource(url: string): string {

@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import SummarizeButton from '../../components/buttons/SummarizeButton.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
+import { formatDateTime } from '../../lib/format'
 import { listPendingHotspots, type Hotspot } from '../../api/summaryJobs'
 
 const hotspots = ref<Hotspot[]>([])
@@ -51,7 +52,7 @@ onMounted(() => void loadHotspots())
           <strong>{{ hotspot.title || hotspot.content_id || hotspot.id }}</strong>
           <span>{{ hotspot.up_name || hotspot.source || '未知来源' }}</span>
         </div>
-        <span class="item-time">{{ hotspot.created_at ? new Date(hotspot.created_at).toLocaleString() : '—' }}</span>
+        <span class="item-time">{{ formatDateTime(hotspot.created_at) }}</span>
         <SummarizeButton :bvid="hotspot.content_id || hotspot.video_id || hotspot.id" />
       </article>
     </div>

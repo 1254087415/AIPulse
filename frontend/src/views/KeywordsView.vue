@@ -9,6 +9,7 @@
 import { onMounted, ref } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime } from '../lib/format'
 
 interface Keyword {
   id: string
@@ -33,12 +34,6 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false
   }
-}
-
-function formatTime(iso: string | null): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
 onMounted(load)
@@ -66,7 +61,7 @@ onMounted(load)
         >
           {{ kw.is_active ? '启用' : '停用' }}
         </span>
-        <span class="keyword-row__time">{{ formatTime(kw.last_triggered_at) }}</span>
+        <span class="keyword-row__time">{{ formatDateTime(kw.last_triggered_at) }}</span>
       </li>
     </ul>
   </section>

@@ -11,6 +11,7 @@ import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime, formatInterval } from '../lib/format'
 import {
   summarizeClassPath,
   summarizeError,
@@ -62,12 +63,6 @@ async function load(): Promise<void> {
   }
 }
 
-function formatTime(iso: string | null): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 const fallbackError = computed(() => summarizeError(errorMessage.value))
 
 onMounted(load)
@@ -110,8 +105,8 @@ onMounted(load)
             >{{ view.collector.display }}</span>
           </dd>
           <dt>权重</dt><dd>{{ view.source.default_weight }}</dd>
-          <dt>间隔</dt><dd>{{ view.source.fetch_interval_minutes }} 分钟</dd>
-          <dt>最近拉取</dt><dd>{{ formatTime(view.source.last_fetched_at) }}</dd>
+          <dt>间隔</dt><dd>{{ formatInterval(view.source.fetch_interval_minutes) }}</dd>
+          <dt>最近拉取</dt><dd>{{ formatDateTime(view.source.last_fetched_at) }}</dd>
           <template v-if="view.source.last_error">
             <dt>错误</dt>
             <dd

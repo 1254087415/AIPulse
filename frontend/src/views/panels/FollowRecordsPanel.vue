@@ -7,17 +7,12 @@ import StatusBadge from '../../components/ui/StatusBadge.vue'
 import { listSummaryJobs, type SummaryJob } from '../../api/summaryJobs'
 import { subscribeSse } from '../../lib/sse-client'
 import { summarizeError } from '../../lib/errorMessage'
+import { formatDateTime, formatStatusLabel } from '../../lib/format'
 
 const jobs = ref<SummaryJob[]>([])
 const loading = ref(false)
 const errorMessage = ref('')
 let cleanup: (() => void) | null = null
-
-function formatTime(value: string | null): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
 
 function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'completed') return 'success'
@@ -89,8 +84,8 @@ onBeforeUnmount(() => cleanup?.())
           >{{ job.video_id }}</span>
         </div>
         <span class="record-up">{{ job.up_name || '未知 UP 主' }}</span>
-        <StatusBadge :tone="statusTone(job.status)" :label="job.status" />
-        <time class="record-time" :datetime="job.created_at || undefined">{{ formatTime(job.created_at) }}</time>
+        <StatusBadge :tone="statusTone(job.status)" :label="formatStatusLabel(job.status)" />
+        <time class="record-time" :datetime="job.created_at || undefined">{{ formatDateTime(job.created_at) }}</time>
         <span class="record-note">{{ job.note_path || '尚未生成笔记' }}</span>
         <SummarizeButton
           :bvid="job.video_id"

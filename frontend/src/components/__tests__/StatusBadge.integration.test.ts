@@ -32,7 +32,7 @@ const followed: FollowedUp = {
   is_active: true,
   status: 'active',
   health: 'healthy',
-  last_checked_at: '2026-07-24T03:00:00Z',
+  last_checked_at: '2026-07-24T11:05:00',
   last_error: null,
   failed_at: null,
   created_at: '2026-07-24T03:00:00Z',
@@ -64,6 +64,10 @@ describe('StatusBadge integrations', () => {
 
     expect(badges.map((badge) => badge.text())).toEqual(['B 站', '启用', '健康'])
     expect(badges.map((badge) => badge.props('tone'))).toEqual(['warning', 'success', 'success'])
+    expect(wrapper.text()).toContain('2026-07-24 11:05')
+    expect(wrapper.text()).toContain('30 分钟')
+    expect(wrapper.text()).not.toContain('分钟 / 次')
+    expect(wrapper.text()).not.toContain('uid:')
   })
 
   it('uses a success badge for enabled sources', async () => {
@@ -72,7 +76,7 @@ describe('StatusBadge integrations', () => {
       data: [{
         id: 'source-1', name: 'B 站', source_type: 'bilibili_up', collector_class: 'Collector',
         default_weight: 1, fetch_interval_minutes: 30, is_active: true,
-        last_fetched_at: null, last_error: null,
+        last_fetched_at: '2026-07-24T11:05:00', last_error: null,
       }],
     })
     const wrapper = mountView(SourcesView)
@@ -81,11 +85,13 @@ describe('StatusBadge integrations', () => {
     const badge = wrapper.findComponent(StatusBadge)
     expect(badge.text()).toBe('启用')
     expect(badge.props('tone')).toBe('success')
+    expect(wrapper.text()).toContain('2026-07-24 11:05')
+    expect(wrapper.text()).toContain('30 分钟')
   })
 
   it('uses warning and danger badges for partial and failed records', async () => {
     mocks.listSummaryJobs.mockResolvedValue([
-      { id: 'job-1', video_id: 'BV1', title: '部分任务', up_name: 'UP', status: 'partial', error: null, note_path: null, created_at: null },
+      { id: 'job-1', video_id: 'BV1', title: '部分任务', up_name: 'UP', status: 'partial', error: null, note_path: null, created_at: '2026-07-24T11:05:00' },
       { id: 'job-2', video_id: 'BV2', title: '失败任务', up_name: 'UP', status: 'failed', error: 'error', note_path: null, created_at: null },
     ])
     const wrapper = mountView(FollowRecordsPanel)
@@ -93,24 +99,29 @@ describe('StatusBadge integrations', () => {
 
     const badges = wrapper.findAllComponents(StatusBadge)
     expect(badges.map((badge) => badge.props('tone'))).toEqual(['warning', 'danger'])
+    expect(badges.map((badge) => badge.text())).toEqual(['部分完成', '失败'])
+    expect(wrapper.text()).toContain('2026-07-24 11:05')
   })
 
   it('uses a warning badge for medium importance', async () => {
     mocks.apiFetch.mockResolvedValue({
       success: true,
-      data: [{ id: 'hotspot-1', title: '热点', summary: null, source_type: 'bilibili_up', heat_score: 0, importance: 'medium', category: null, published_at: null }],
+      data: [{ id: 'hotspot-1', title: '热点', summary: null, source_type: 'bilibili_up', heat_score: 0, importance: 'medium', category: null, published_at: '2026-07-24T11:05:00' }],
       meta: { total: 1, page: 1, limit: 20 },
     })
     const wrapper = mountView(DashboardHotspotPanel)
     await flushPromises()
 
-    expect(wrapper.findComponent(StatusBadge).props('tone')).toBe('warning')
+    const badge = wrapper.findComponent(StatusBadge)
+    expect(badge.props('tone')).toBe('warning')
+    expect(badge.text()).toBe('中')
+    expect(wrapper.text()).toContain('2026-07-24 11:05')
   })
 
   it('uses a neutral badge for scheduled job triggers', async () => {
     mocks.apiFetch.mockResolvedValue({
       success: true,
-      data: [{ id: 'scan', name: 'Scan', func: 'aipulse.scan', trigger: 'interval[0:30:00]', next_run_time: null }],
+      data: [{ id: 'scan', name: 'sync_all_sources', func: 'aipulse.scan', trigger: 'interval[0:30:00]', next_run_time: '2026-07-24T11:05:00' }],
     })
     const wrapper = mountView(JobsView)
     await flushPromises()
@@ -118,5 +129,8 @@ describe('StatusBadge integrations', () => {
     const badge = wrapper.findComponent(StatusBadge)
     expect(badge.text()).toBe('每 30 分钟')
     expect(badge.props('tone')).toBe('neutral')
+    expect(wrapper.text()).toContain('同步全部来源')
+    expect(wrapper.text()).not.toContain('sync_all_sources')
+    expect(wrapper.text()).toContain('2026-07-24 11:05')
   })
 })

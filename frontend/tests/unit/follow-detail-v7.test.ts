@@ -618,13 +618,13 @@ describe('TC-UI-FOLLOW-DETAIL-13 返回按钮调 router.back()', () => {
 
 // ---- TC-UI-FOLLOW-DETAIL-14 -----------------------------------------------
 
-describe('TC-UI-FOLLOW-DETAIL-14 时间渲染 toLocaleString(zh-CN)', () => {
-  it('renders last_checked_at as a zh-CN formatted date string', async () => {
+describe('TC-UI-FOLLOW-DETAIL-14 时间渲染 YYYY-MM-DD HH:mm', () => {
+  it('renders last_checked_at in the shared date format', async () => {
     detailFixture.last_checked_at = '2026-07-25T14:32:18Z'
     const { wrapper } = await mountDetailView()
     const time = wrapper.find('time, [data-testid="last-checked-at"]')
     expect(time.exists()).toBe(true)
-    expect(time.text()).toMatch(/2026[\/年-]\s*7[\/月-]\s*25\s+\d{1,2}:\d{2}:\d{2}/)
+    expect(time.text()).toBe('2026-07-25 22:32')
     wrapper.unmount()
   })
 })

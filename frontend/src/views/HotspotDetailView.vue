@@ -10,6 +10,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime, formatStatusLabel } from '../lib/format'
 import { safeHref } from '../lib/safeUrl'
 
 interface Hotspot {
@@ -54,12 +55,6 @@ async function load(id: string): Promise<void> {
 
 const safeUrl = computed<string | null>(() => safeHref(hotspot.value?.url))
 
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 onMounted(() => void load(hotspotId.value))
 watch(() => hotspotId.value, (next) => void load(next))
 </script>
@@ -80,7 +75,7 @@ watch(() => hotspotId.value, (next) => void load(next))
       <h3 class="hotspot-card__title">{{ hotspot.title || hotspot.id }}</h3>
       <dl class="hotspot-card__meta">
         <dt>来源</dt><dd>{{ hotspot.source || '—' }}</dd>
-        <dt>状态</dt><dd>{{ hotspot.status || hotspot.decision_status || '—' }}</dd>
+        <dt>状态</dt><dd>{{ formatStatusLabel(hotspot.status || hotspot.decision_status || '—') }}</dd>
         <dt>URL</dt>
         <dd>
           <a v-if="safeUrl" :href="safeUrl" target="_blank" rel="noopener noreferrer">
@@ -88,8 +83,8 @@ watch(() => hotspotId.value, (next) => void load(next))
           </a>
           <span v-else>{{ hotspot.url || '—' }}</span>
         </dd>
-        <dt>创建时间</dt><dd>{{ formatTime(hotspot.created_at) }}</dd>
-        <dt>归档时间</dt><dd>{{ formatTime(hotspot.archived_at) }}</dd>
+        <dt>创建时间</dt><dd>{{ formatDateTime(hotspot.created_at) }}</dd>
+        <dt>归档时间</dt><dd>{{ formatDateTime(hotspot.archived_at) }}</dd>
       </dl>
       <p v-if="hotspot.summary" class="hotspot-card__summary">{{ hotspot.summary }}</p>
     </article>

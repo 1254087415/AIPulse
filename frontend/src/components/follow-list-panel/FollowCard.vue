@@ -11,6 +11,7 @@
 import { computed } from 'vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import AppButton from '../ui/AppButton.vue'
+import { formatDateTime, formatInterval } from '../../lib/format'
 import type { FollowedUp } from '../../api/followedUp'
 
 interface Props {
@@ -42,7 +43,7 @@ const healthBadge = computed(() => ({
 
 const lastCheckedLabel = computed(() => {
   if (!props.followed.last_checked_at) return '尚未扫描'
-  return new Date(props.followed.last_checked_at).toLocaleString('zh-CN')
+  return formatDateTime(props.followed.last_checked_at)
 })
 
 const avatarInitial = computed(() => {
@@ -71,8 +72,7 @@ const onEdit = (): void => emit('edit', props.followed.id)
 
     <div class="follow-card__body">
       <header class="follow-card__header">
-        <h3 class="follow-card__name">{{ followed.display_name || followed.uid }}</h3>
-        <span class="follow-card__uid">uid: {{ followed.uid }}</span>
+        <h3 class="follow-card__name" :title="followed.uid">{{ followed.display_name || followed.uid }}</h3>
       </header>
 
       <div class="follow-card__meta">
@@ -87,7 +87,7 @@ const onEdit = (): void => emit('edit', props.followed.id)
         <span class="follow-card__label">上次同步</span>
         <time :datetime="followed.last_checked_at ?? ''">{{ lastCheckedLabel }}</time>
         <span class="follow-card__sep">·</span>
-        <span>{{ followed.fetch_interval_minutes }} 分钟 / 次</span>
+        <span>{{ formatInterval(followed.fetch_interval_minutes) }}</span>
       </p>
 
       <p
@@ -198,12 +198,6 @@ const onEdit = (): void => emit('edit', props.followed.id)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.follow-card__uid {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
 }
 
 .follow-card__meta {

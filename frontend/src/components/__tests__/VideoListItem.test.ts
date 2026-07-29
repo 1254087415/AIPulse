@@ -28,6 +28,7 @@ describe('VideoListItem', () => {
     expect(wrapper.text()).toContain('示例视频')
     expect(wrapper.text()).toContain('BV1abc')
     expect(wrapper.find('[data-status]').attributes('data-status')).toBe('pending')
+    expect(wrapper.text()).toContain('等待处理')
     wrapper.unmount()
   })
 

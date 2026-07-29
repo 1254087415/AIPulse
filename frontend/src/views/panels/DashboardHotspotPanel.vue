@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import StatusBadge from '../../components/ui/StatusBadge.vue'
 import { apiFetch } from '../../lib/apiFetch'
+import { formatDateTime, formatImportanceLabel } from '../../lib/format'
 
 interface Hotspot {
   id: string
@@ -25,12 +26,6 @@ const hotspots = ref<Hotspot[]>([])
 const total = ref(0)
 const loading = ref(false)
 const errorMessage = ref('')
-
-function formatTime(value: string | null): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -83,10 +78,10 @@ onMounted(load)
           <span>{{ hotspot.source_type }}</span>
           <StatusBadge
             :tone="hotspot.importance === 'high' ? 'danger' : hotspot.importance === 'medium' ? 'warning' : 'neutral'"
-            :label="hotspot.importance"
+            :label="formatImportanceLabel(hotspot.importance)"
           />
           <span v-if="hotspot.category">{{ hotspot.category }}</span>
-          <time>{{ formatTime(hotspot.published_at) }}</time>
+          <time>{{ formatDateTime(hotspot.published_at) }}</time>
         </div>
       </li>
     </ul>

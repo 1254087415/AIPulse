@@ -32,6 +32,7 @@ import CollectionAccordion from '../components/follow/CollectionAccordion.vue'
 import HealthDot from '../components/follow/HealthDot.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import ConfirmModal from '../components/ui/ConfirmModal.vue'
+import { formatDateTime, formatInterval, formatStatusLabel } from '../lib/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,7 +96,7 @@ const orphanVideos = computed(() => allVideos.value.filter((v) => !v.collection_
 const lastCheckedText = computed(() => {
   const ts = detail.value?.last_checked_at
   if (!ts) return '尚未扫描'
-  return new Date(ts).toLocaleString('zh-CN')
+  return formatDateTime(ts)
 })
 
 function onScanNow() {
@@ -179,7 +180,7 @@ function onConfirmDelete() {
               class="tag"
               :class="`follow-detail-tag--${detail.health}`"
             >
-              {{ detail.health }}
+              {{ formatStatusLabel(detail.health) }}
             </span>
             <span v-if="!detail.enabled" class="tag follow-detail-tag--muted">
               已停用
@@ -236,7 +237,7 @@ function onConfirmDelete() {
           <dt>策略</dt>
           <dd><code>{{ detail.strategy }}</code></dd>
           <dt>间隔</dt>
-          <dd><code>{{ detail.interval_minutes }} 分钟</code></dd>
+          <dd><code>{{ formatInterval(detail.interval_minutes) }}</code></dd>
           <dt>上次扫描</dt>
           <dd>
             <time

@@ -9,6 +9,7 @@ import { computed, onMounted, ref } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime, formatJobName } from '../lib/format'
 import {
   summarizeFuncPath,
   summarizeTrigger,
@@ -58,12 +59,6 @@ async function load(): Promise<void> {
   }
 }
 
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 const fallbackError = computed(() => summarizeError(errorMessage.value))
 
 onMounted(load)
@@ -89,7 +84,7 @@ onMounted(load)
     <ul v-else class="job-list" data-testid="job-list">
       <li v-for="view in jobs" :key="view.job.id" class="job-row" data-testid="job-row">
         <div class="job-row__head">
-          <span class="job-row__name">{{ view.job.name }}</span>
+          <span class="job-row__name">{{ formatJobName(view.job.name) }}</span>
           <StatusBadge
             tone="neutral"
             :label="view.triggerLabel"
@@ -103,7 +98,7 @@ onMounted(load)
           :title="view.func.technical"
         >{{ view.func.display }}</span>
         <div class="job-row__meta">
-          <span class="job-row__time">下次运行：{{ formatTime(view.job.next_run_time) }}</span>
+          <span class="job-row__time">下次运行：{{ formatDateTime(view.job.next_run_time) }}</span>
         </div>
       </li>
     </ul>

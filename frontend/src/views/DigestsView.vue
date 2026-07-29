@@ -9,6 +9,7 @@
 import { onMounted, ref } from 'vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime } from '../lib/format'
 
 interface Digest {
   id: string
@@ -34,12 +35,6 @@ async function load(): Promise<void> {
   }
 }
 
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 onMounted(load)
 </script>
 
@@ -59,7 +54,7 @@ onMounted(load)
       <li v-for="d in digests" :key="d.id" class="digest-row">
         <h3 class="digest-row__title">{{ d.title || d.id }}</h3>
         <p v-if="d.summary" class="digest-row__summary">{{ d.summary }}</p>
-        <span class="digest-row__time">{{ formatTime(d.created_at) }}</span>
+        <span class="digest-row__time">{{ formatDateTime(d.created_at) }}</span>
       </li>
     </ul>
   </section>

@@ -100,17 +100,17 @@ describe('TasksView', () => {
     expect(cards).toHaveLength(4)
 
     expect(cards[0].find('.status-dot.running').exists()).toBe(true)
-    expect(cards[0].text()).toContain('RUNNING')
+    expect(cards[0].text()).toContain('处理中')
     expect(cards[0].text()).toContain('Running Task')
 
     expect(cards[1].find('.status-dot.completed').exists()).toBe(true)
-    expect(cards[1].text()).toContain('DONE')
+    expect(cards[1].text()).toContain('已完成')
 
     expect(cards[2].find('.status-dot.failed').exists()).toBe(true)
-    expect(cards[2].text()).toContain('FAILED')
+    expect(cards[2].text()).toContain('失败')
 
     expect(cards[3].find('.status-dot.pending').exists()).toBe(true)
-    expect(cards[3].text()).toContain('PENDING')
+    expect(cards[3].text()).toContain('等待处理')
 
     wrapper.unmount()
   })
@@ -200,7 +200,7 @@ describe('TasksView', () => {
 
     const card = wrapper.find('.task-card')
     expect(card.find('.status-dot.completed').exists()).toBe(true)
-    expect(card.text()).toContain('DONE')
+    expect(card.text()).toContain('已完成')
 
     wrapper.unmount()
   })

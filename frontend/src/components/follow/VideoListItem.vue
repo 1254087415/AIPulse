@@ -14,6 +14,7 @@
  * button is rendered as a placeholder so the layout matches the spec.
  */
 import { computed } from 'vue'
+import { formatStatusLabel } from '../../lib/format'
 
 export interface VideoListItemVideo {
   bvid: string
@@ -60,7 +61,7 @@ const isOrphan = computed(() => props.variant === 'orphan')
       <span class="video-list-item__title">{{ video.title || video.bvid }}</span>
       <code class="video-list-item__bvid">{{ video.bvid }}</code>
       <span class="video-list-item__status" :data-status="video.status">
-        {{ video.status }}
+        {{ formatStatusLabel(video.status) }}
       </span>
     </div>
     <div class="video-list-item__actions">
