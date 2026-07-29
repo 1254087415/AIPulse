@@ -21,6 +21,7 @@ BV1PbEnzfEP2，spec 02 verifier 已验有 ai-zh 字幕）+ 真实 Obsidian vault
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -32,6 +33,8 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+
+logger = logging.getLogger(__name__)
 
 # =====================================================================
 # MODULE-LEVEL ENVIRONMENT OVERRIDES
@@ -840,15 +843,35 @@ async def test_e2e_path_b_summary_three_sink(e2e_run: dict) -> None:
     )
 
     # ─────────────── TC-03 ───────────────
+    #
+    # 前端「查看总结」按钮 = 绿色 ``completed``。``partial`` 状态表示 **业务侧**
+    # 完整性被破坏（spec 09 §5.5 L6 硬契约 + feedback_status-must-not-mask-failure
+    # 备忘录），前端按钮 **不应** enable，obsidian://open 跳转也不应触发——
+    # 因此本 E2E **不允许 partial**：实测链路（罗翔 11 min 字幕缓存 + MiniMax
+    # 真 LLM + 真 vault + 真 Reminders）必须走到 ``completed`` 才算通过。
+    #
+    # 若将来出现 flaky partial（LLM 返回格式破损 / B 站 cookie 过期等）：
+    # - 不要软化为 ``in {"completed", "partial"}`` —— 那会让 feedback 硬红线
+    #   退化；改去修上游问题
+    # - 真要临时放行 partial：在下面 ``logger.warning`` 那块显式记录 + 在
+    #   验收者报告里标注 RED-NOT-BLOCK（与 L1#5/L4 同质）
     sj_status = e2e_run["summary_job_status"]
-    note_path = e2e_run["summary_job_note_path"]
-    assert sj_status in {"completed", "partial"}, (
-        f"[TC-03] unexpected summary_jobs.status={sj_status}; "
+    if sj_status == "partial":
+        logger.warning(
+            "[TC-03] summary_jobs 走了 partial 路径 — 真 3-sink 链路有缺漏；"
+            " reminder_id=%r hotspot_id=%r steps=%d",
+            e2e_run["summary_job_reminder_id"],
+            e2e_run["summary_job_hotspot_id"],
+            len(e2e_run["summary_job_steps"]),
+        )
+    assert sj_status == "completed", (
+        f"[TC-03] expected status=completed (full 3-sink OK), got {sj_status!r}; "
         f"steps={len(e2e_run['summary_job_steps'])}, "
         f"reminder_id={e2e_run['summary_job_reminder_id']!r}, "
         f"hotspot_id={e2e_run['summary_job_hotspot_id']!r}"
     )
-    assert note_path, "[TC-03] completed/partial job must have note_path"
+    note_path = e2e_run["summary_job_note_path"]
+    assert note_path, "[TC-03] completed job must have note_path"
     note_p = Path(note_path)
     assert note_p.exists(), f"[TC-03] note_path does not exist on disk: {note_path}"
     # Frontend ``obsidian://open?path=...`` URL 可由此构造
@@ -918,6 +941,27 @@ async def test_e2e_path_b_summary_three_sink(e2e_run: dict) -> None:
     )
 
     # ─────────────── TC-07 ───────────────
+    #
+    # **已知妥协：** send_notification → create_reminder 走 ``osascript``，
+    # macOS AppleScript 在 iCloud 同步繁忙 / 系统调度延迟下经常超时：
+    #
+    #   - ``executor_timeout_s=30s`` 已够让 osascript 进程完成写库
+    #   - 但 osascript 进程的 stdout 可能返 0/empty ID（仅 reminder 真落库）；
+    #     ``create_reminder()`` 在这种情况下仍抛 ``RuntimeError``（per
+    #     ``aipulse.apple.reminders.create_reminder`` 契约），导致
+    #     ``learning_events.apple_reminder_id`` **写不进 DB**——
+    #     但 Reminders.app UI 里 reminder **是** 真存在的（与
+    #     ``scripts/round6_real_three_sink.py:123-139`` 注释同质）。
+    #
+    # 因此本 TC 用 ``db_ok or os_ok`` 双路断言：
+    #
+    #   - ``db_ok`` — ``summary_job_reminder_id`` 非空（同步成功路径）
+    #   - ``os_ok`` — 当前 ``AIPulse测试`` 列表 osascript 查到 E2E-TEST 名
+    #     （异步落库路径；即便 ``create_reminder`` 报超时，reminder 仍在）
+    #
+    # **升级路径：** 当上游给 ``create_reminder`` 加 retry+补 upsert 时，本
+    # 妥协可收紧为 ``db_ok and os_ok``；在那之前双路 OR 是 macOS AppleScript
+    # 异步落库下的唯一可行解。
     db_reminder_id = e2e_run["summary_job_reminder_id"]
     db_ok = bool(db_reminder_id)
 
