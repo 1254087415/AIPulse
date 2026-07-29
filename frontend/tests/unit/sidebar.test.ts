@@ -202,6 +202,26 @@ describe('Sidebar', () => {
 
     wrapper.unmount()
   })
+
+  it('renders six inline SVG icons (no unicode glyphs) for L3 icon set unification', async () => {
+    const wrapper = mount(Sidebar, {
+      global: { plugins: [router] },
+    })
+    await flushPromises()
+
+    const items = wrapper.findAll('.app-sidebar__item')
+    expect(items).toHaveLength(6)
+    items.forEach((item) => {
+      const iconSpan = item.find('.app-sidebar__icon')
+      expect(iconSpan.exists()).toBe(true)
+      // Icon span should render an inline SVG and NOT contain text glyphs.
+      expect(iconSpan.find('svg.app-sidebar__icon-svg').exists()).toBe(true)
+      // Strip whitespace, assert empty content (no ◐/⚙/✎/⏱/✦/☰ leak)
+      expect(iconSpan.text().trim()).toBe('')
+    })
+
+    wrapper.unmount()
+  })
 })
 
 describe('SidebarNav', () => {
@@ -239,6 +259,27 @@ describe('SidebarNav', () => {
 
     expect(wrapper.emitted('navigate')).toBeTruthy()
     expect(wrapper.emitted('navigate')![0]).toEqual(['/about'])
+
+    wrapper.unmount()
+  })
+
+  it('renders an inline SVG icon when an item has icon data', () => {
+    const wrapper = mount(SidebarNav, {
+      props: {
+        items: [
+          { key: 'home', label: 'Home', to: '/home', icon: '<circle cx="12" cy="12" r="9"/>' },
+        ],
+        activeKey: 'home',
+      },
+    })
+
+    const svg = wrapper.find('svg.app-sidebar__icon-svg')
+    expect(svg.exists()).toBe(true)
+    expect(svg.attributes('viewBox')).toBe('0 0 24 24')
+    expect(svg.attributes('stroke')).toBe('currentColor')
+    expect(svg.find('circle').exists()).toBe(true)
+    // No leftover unicode glyph in the icon span
+    expect(wrapper.find('.app-sidebar__icon').text()).toBe('')
 
     wrapper.unmount()
   })

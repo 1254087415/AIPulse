@@ -10,7 +10,7 @@ export interface SidebarNavItem {
   key: string
   label: string
   to: string
-  /** Optional glyph displayed above the label when expanded. */
+  /** Optional inline SVG inner (paths/circles) rendered as a 24x24 icon. */
   icon?: string
 }
 
@@ -54,7 +54,16 @@ const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
           @click="onClick(item, $event)"
         >
           <span v-if="item.icon" class="app-sidebar__icon" aria-hidden="true">
-            {{ item.icon }}
+            <svg
+              class="app-sidebar__icon-svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              v-html="item.icon"
+            />
           </span>
           <span v-if="!collapsed" class="app-sidebar__label">{{ item.label }}</span>
         </a>
@@ -121,8 +130,17 @@ const onClick = (item: SidebarNavItem, event: MouseEvent): void => {
 
 .app-sidebar__icon {
   width: 18px;
-  text-align: center;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+}
+
+.app-sidebar__icon-svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .app-sidebar__label {

@@ -32,15 +32,24 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 
-// Spec §6.9 — six-entry nav rail. Follow-up tabs (关注列表 / 处理记录 /
-// 即将学习 / 失败) live inside DashboardView, not here.
+// Inline lucide-style SVG paths (24x24 viewBox, stroke-width 2, currentColor)
+// 一套线宽/尺寸的图标，loop D 把 ◐/⚙/✎/⏱/✦/☰ 散装 unicode 替换为统一 icon set。
+const ICONS: Readonly<Record<string, string>> = {
+  hotspot: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/>',
+  sources: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>',
+  keywords: '<path d="M4 20l4-1 11-11a2.83 2.83 0 0 0-4-4L4 15v5z"/><path d="M14 5l4 4"/>',
+  jobs: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  digests: '<path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/>',
+  settings: '<path d="M12 2l2 4 4-1-1 4 4 2-4 2 1 4-4-1-2 4-2-4-4 1 1-4-4-2 4-2-1-4 4 1z"/><circle cx="12" cy="12" r="3"/>',
+}
+
 const NAV_ITEMS: SidebarNavItem[] = [
-  { key: 'hotspot', label: 'AI 热点', to: '/dashboard', icon: '◐' },
-  { key: 'sources', label: '来源', to: '/sources', icon: '⚙' },
-  { key: 'keywords', label: '关键词', to: '/keywords', icon: '✎' },
-  { key: 'jobs', label: '定时任务', to: '/jobs', icon: '⏱' },
-  { key: 'digests', label: '摘要', to: '/digests', icon: '✦' },
-  { key: 'settings', label: '系统', to: '/settings', icon: '☰' },
+  { key: 'hotspot', label: 'AI 热点', to: '/dashboard', icon: ICONS.hotspot },
+  { key: 'sources', label: '来源', to: '/sources', icon: ICONS.sources },
+  { key: 'keywords', label: '关键词', to: '/keywords', icon: ICONS.keywords },
+  { key: 'jobs', label: '定时任务', to: '/jobs', icon: ICONS.jobs },
+  { key: 'digests', label: '摘要', to: '/digests', icon: ICONS.digests },
+  { key: 'settings', label: '系统', to: '/settings', icon: ICONS.settings },
 ]
 
 const activeKey = computed<string>(() => {
