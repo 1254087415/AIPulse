@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 // ---------------------------------------------------------------------------
@@ -202,5 +202,75 @@ describe('Popup — Douyin consent + auto-fetch integration', () => {
       },
       { timeout: 3000 }
     );
+  });
+});
+
+describe('Popup — inline copy URL button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function stubChromeWithLink() {
+    const sendMessageMock = vi.fn();
+    const storage = makeStorage();
+    const link = {
+      url: 'https://www.bilibili.com/video/BV1xx411c7mD',
+      platform: 'bilibili',
+      title: 'B站视频',
+    };
+
+    vi.stubGlobal('chrome', {
+      tabs: {
+        query: vi.fn().mockResolvedValue([{ id: 3, url: link.url }]),
+        sendMessage: sendMessageMock,
+      },
+      runtime: {
+        sendMessage: vi.fn().mockResolvedValueOnce({ links: [] }),
+        getManifest: () => ({ version: '0.1.5' }),
+        lastError: undefined,
+      },
+      storage: { local: storage },
+    });
+    sendMessageMock.mockResolvedValueOnce({ ok: true, links: [link] });
+    return link;
+  }
+
+  it('renders the copy button inline in the link field, not in .actions', async () => {
+    stubChromeWithLink();
+    const { Popup } = await import('../../src/popup');
+    const { container } = render(<Popup />);
+
+    const copyBtn = await screen.findByRole('button', { name: '复制链接' }, { timeout: 3000 });
+    expect(copyBtn).toHaveClass('copy-url-btn');
+    // 位于链接行内
+    expect(copyBtn.closest('.url-row')).not.toBeNull();
+    // .actions 区不再有「复制链接」大按钮
+    const actions = container.querySelector('.actions');
+    expect(actions?.textContent ?? '').not.toContain('复制链接');
+  });
+
+  it('copies the displayed URL and shows confirmation status on click', async () => {
+    const link = stubChromeWithLink();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    const { Popup } = await import('../../src/popup');
+    render(<Popup />);
+
+    const copyBtn = await screen.findByRole('button', { name: '复制链接' }, { timeout: 3000 });
+    fireEvent.click(copyBtn);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(link.url);
+      expect(screen.getByText('链接已复制')).toBeInTheDocument();
+    });
   });
 });
