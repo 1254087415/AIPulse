@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from aipulse.core.article_pipeline import ArticlePipeline
 from aipulse.core.config import AppSettings, get_settings, reset_settings
 from aipulse.core.content_router import ContentType
+from aipulse.core.datetime_utils import format_iso_utc
 from aipulse.core.pipeline import PipelineContext, PipelineEvent, PipelineObserver
 from aipulse.core.rpc import JsonRpcApplicationError, JsonRpcRequest, JsonRpcResponse
 from aipulse.core.video_pipeline import VideoPipeline
@@ -190,7 +191,7 @@ class Sidecar:
                     "status": task.status,
                     "title": task.title,
                     "error_message": task.error_message,
-                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "created_at": format_iso_utc(task.created_at),
                 }
                 for task in tasks
             ]

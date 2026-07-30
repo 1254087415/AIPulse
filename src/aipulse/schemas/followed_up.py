@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from aipulse.core.datetime_utils import format_iso_utc
 
-
 PlatformStr = Annotated[str, Field(min_length=1, max_length=16)]
 UidStr = Annotated[str, Field(min_length=1, max_length=64)]
 DisplayNameStr = Annotated[str, Field(min_length=1, max_length=128)]
@@ -27,13 +26,6 @@ DecisionStatusStr = Annotated[
 ]
 
 
-def _serialize_utc_datetime(_field_name: str) -> Any:
-    """Return a Pydantic field_serializer that emits ``+00:00`` offset."""
-
-    def _serializer(value: datetime | None) -> str | None:
-        return format_iso_utc(value)
-
-    return _serializer
 
 
 class FollowedUpBase(BaseModel):

@@ -16,10 +16,9 @@ verifier 挖出的三个缺陷：
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 
 from aipulse.core.datetime_utils import format_iso_utc, to_utc
@@ -114,7 +113,6 @@ class TestRepositoryWritesAwareUtc:
         task = await repo.create("https://example.com")
         # 直接调 before flush（DB 还没读 → 不会被 SQLite 丢 tz）
         # 用 mock 验证修复后写入字段是 aware
-        from aipulse.core.datetime_utils import now_utc
 
         # 截 snapshot 验证：在写入 session 之前抓 call
         captured = {}
@@ -123,7 +121,7 @@ class TestRepositoryWritesAwareUtc:
 
         async def spy_update(*args, **kwargs):
             # 拦截，在 flush 之前看 task.updated_at.tzinfo
-            captured["before_flush"] = bool(True)
+            captured["before_flush"] = True
             result = await real_update(*args, **kwargs)
             # flush+refresh 之后是 naive（SQLite 行为），但 series_out 应该带偏移
             captured["serialized"] = format_iso_utc(result.updated_at)
@@ -289,3 +287,119 @@ class TestLegacyDataCompatibility:
         # 比较（修复后 _is_due 必须能处理）
         now = datetime(2026, 7, 29, 17, 30, 0, tzinfo=UTC)
         assert normalized <= now
+
+
+# ------------------------------------------------------------------
+# High #1 — DailyDigestOut (HotSpot DigestsView)
+# ------------------------------------------------------------------
+class TestDailyDigestOutOffset:
+    """DigestsView 消费的 /api/digests 输出，必带 +00:00。"""
+
+    @pytest.mark.unit
+    def test_naive_input_serializes_with_offset(self):
+        """naive datetime 入 Pydantic → model_dump 必带 +00:00。"""
+        from aipulse.hotspot.models import DailyDigest
+        from aipulse.hotspot.schemas import DailyDigestOut
+
+        # 模拟存量/未修复写入：naive datetime
+        row = DailyDigest(
+            id="d1",
+            date=datetime(2026, 7, 29).date(),
+            title="daily",
+            content="body",
+            top_hotspot_ids=None,
+            generated_at=datetime(2026, 7, 29, 16, 55, 1),  # naive
+            pushed_at=datetime(2026, 7, 30, 8, 0, 0),  # naive
+        )
+        out = DailyDigestOut.model_validate(row).model_dump()
+        assert out["generated_at"] == "2026-07-29T16:55:01+00:00"
+        assert out["pushed_at"] == "2026-07-30T08:00:00+00:00"
+
+    @pytest.mark.unit
+    def test_aware_input_utc_serializes_same(self):
+        """aware UTC 入 Pydantic → 输出保持 +00:00 偏移。"""
+        from aipulse.hotspot.models import DailyDigest
+        from aipulse.hotspot.schemas import DailyDigestOut
+
+        row = DailyDigest(
+            id="d2",
+            date=datetime(2026, 7, 29).date(),
+            title="daily",
+            content="body",
+            top_hotspot_ids=None,
+            generated_at=datetime(2026, 7, 29, 16, 55, 1, tzinfo=UTC),
+            pushed_at=None,
+        )
+        out = DailyDigestOut.model_validate(row).model_dump()
+        assert out["generated_at"].endswith("+00:00")
+        assert out["pushed_at"] is None
+
+
+# ------------------------------------------------------------------
+# High #2 — scheduler webui 调度日志
+# ------------------------------------------------------------------
+class TestSchedulerWebuiIsoformatOffset:
+    """GET /api/scheduler/logs → started_at / finished_at 必带 +00:00。"""
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_webui_logs_naive_input_serializes_with_offset(self, db_session):
+        from sqlalchemy import select
+
+        from aipulse.scheduler.models import SchedulerJobLog
+
+        # 模拟存量/未修复写入：naive datetime
+        log = SchedulerJobLog(
+            job_id="j1",
+            job_name="test_job",
+            status="success",
+            started_at=datetime(2026, 7, 29, 16, 55, 1),  # naive
+            finished_at=datetime(2026, 7, 29, 16, 56, 30),  # naive
+            message="ok",
+            exception=None,
+        )
+        db_session.add(log)
+        await db_session.commit()
+        await db_session.refresh(log)
+
+        # 通过 to_utc + format_iso_utc 模拟 webui.py 序列化路径
+        row = (
+            await db_session.execute(
+                select(SchedulerJobLog).where(SchedulerJobLog.id == log.id)
+            )
+        ).scalar_one()
+        assert row.started_at is not None
+        assert format_iso_utc(row.started_at) == "2026-07-29T16:55:01+00:00"
+        assert format_iso_utc(row.finished_at) == "2026-07-29T16:56:30+00:00"
+
+
+# ------------------------------------------------------------------
+# High #3 — desktop sidecar list_tasks Tauri bridge
+# ------------------------------------------------------------------
+class TestSidecarListTasksOffset:
+    """Tauri list_tasks JSON-RPC → created_at 必带 +00:00。"""
+
+    @pytest.mark.integration
+    @pytest.mark.asyncio
+    async def test_list_tasks_naive_serializes_with_offset(self, db_session):
+        """list_tasks 返回的 created_at 必带 UTC 偏移。
+
+        sidecar._list_tasks 把 task.created_at 直接 format_iso_utc 出去，
+        经 Tauri JSON-RPC 直达 TasksView。SQLite 读回会丢 tz，所以无论
+        aware 或 naive 入参，序列化输出都必带 +00:00。
+        """
+        from aipulse.store.repository import TaskRepository
+
+        repo = TaskRepository(db_session)
+        task = await repo.create("https://example.com")
+
+        # list_recent + format_iso_utc 模拟 sidecar 路径
+        tasks = await repo.list_recent(limit=10)
+        assert any(t.id == task.id for t in tasks)
+        target = next(t for t in tasks if t.id == task.id)
+        assert target.created_at is not None
+        # SQLite 读回必是 naive（应用层无法控制） → format_iso_utc 仍带 +00:00
+        serialized = format_iso_utc(target.created_at)
+        assert serialized.endswith("+00:00"), (
+            f"sidecar list_tasks created_at 缺偏移: {serialized}"
+        )

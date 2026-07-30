@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 import re
 from datetime import UTC, datetime
-from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -18,7 +17,6 @@ from aipulse.collectors.bilibili_up.base import (
     UpCollection,
     UpVideo,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +53,7 @@ class BilibiliUpHtmlCollector(BaseBilibiliUpCollector):
         self,
         mid: str,
         count: int,
-        last_cursor_id: Optional[str] = None,
+        last_cursor_id: str | None = None,
     ) -> list[UpVideo]:
         """抓主页首屏 + 翻页（按需）。B 站 DOM 含 pubdate 属性。"""
         url = SPACE_URL.format(mid=mid)
@@ -138,7 +136,7 @@ class BilibiliUpHtmlCollector(BaseBilibiliUpCollector):
             return False, f"校验失败：{exc}"
 
     @staticmethod
-    def _parse_card(card) -> Optional[UpVideo]:
+    def _parse_card(card) -> UpVideo | None:
         """从 bili-video-card 元素提取 UpVideo。
 
         B 站当前结构：

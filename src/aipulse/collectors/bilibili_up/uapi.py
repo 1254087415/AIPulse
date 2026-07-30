@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Optional
 
 import httpx
 
@@ -23,7 +22,6 @@ from aipulse.collectors.bilibili_up.base import (
     UpCollection,
     UpVideo,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +50,7 @@ class BilibiliUpUapiCollector(BaseBilibiliUpCollector):
         self,
         mid: str,
         count: int,
-        last_cursor_id: Optional[str] = None,
+        last_cursor_id: str | None = None,
     ) -> list[UpVideo]:
         """分页拉取 UP主 视频，直到命中 last_cursor_id 或 count 满。
 
@@ -151,7 +149,7 @@ class BilibiliUpUapiCollector(BaseBilibiliUpCollector):
         return True, name
 
     @staticmethod
-    def _parse_video(item: dict) -> Optional[UpVideo]:
+    def _parse_video(item: dict) -> UpVideo | None:
         """解析 archives 端点单条 item。"""
         try:
             bvid = item["bvid"]

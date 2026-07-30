@@ -69,9 +69,9 @@ class TestToUtc:
         """
         naive = datetime(2026, 7, 29, 16, 55, 1)
         aware = datetime(2026, 7, 29, 17, 55, 1, tzinfo=UTC)
-        # 不归一会抛 TypeError
+        # 不归一会抛 TypeError：直接 `>=` naive aware
         with pytest.raises(TypeError):
-            naive + timedelta(minutes=30) >= aware  # type: ignore[operator]
+            naive >= aware  # noqa: B015
         # 归一后 OK
         assert to_utc(naive) <= aware
 

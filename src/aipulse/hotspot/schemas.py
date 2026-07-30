@@ -1,9 +1,12 @@
 """Pydantic schemas for hotspot API responses and requests."""
 
-from datetime import date as _date, datetime
+from datetime import date as _date
+from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer
+
+from aipulse.core.datetime_utils import format_iso_utc
 
 
 class HotspotOut(BaseModel):
@@ -91,6 +94,16 @@ class DailyDigestOut(BaseModel):
     top_hotspot_ids: list[Any] | None
     generated_at: datetime
     pushed_at: datetime | None
+
+    @field_serializer("generated_at", "pushed_at", check_fields=False)
+    def _serialize_datetime(self, value: datetime | None) -> str | None:
+        """v0.3 时区修复：DATETIME 字段序列化必带 +00:00 偏移。
+
+        SQLite DATETIME 读回丢 tzinfo，让 Pydantic 默认 isoformat()
+        输出无偏移串 → 前端 format.ts fallback +08:00 误读 → 慢 8 小时。
+        走 ``format_iso_utc`` 统一归一为 UTC aware 后再序列化。
+        """
+        return format_iso_utc(value)
 
 
 class GenerateDigestRequest(BaseModel):

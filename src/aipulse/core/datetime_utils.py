@@ -15,7 +15,6 @@ v0.3 修时区缺陷（spec §9.1 I 类红线）：
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Optional
 
 
 def now_utc() -> datetime:
@@ -27,7 +26,7 @@ def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+def to_utc(dt: datetime | None) -> datetime | None:
     """Normalize a datetime to a UTC-aware one.
 
     Legacy SQLite rows may carry naive UTC values (datetimes written
@@ -42,7 +41,7 @@ def to_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(UTC)
 
 
-def format_iso_utc(dt: Optional[datetime]) -> Optional[str]:
+def format_iso_utc(dt: datetime | None) -> str | None:
     """Serialize a datetime to ISO 8601 with ``+00:00`` offset.
 
     Naive inputs are treated as UTC (legacy rows). The output always

@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from aipulse.core.datetime_utils import format_iso_utc
 
-
 PlatformStr = Annotated[str, Field(min_length=1, max_length=16)]
 LearningStatusStr = Annotated[
     str, Field(pattern=r"^(unread|learning|mastered|review)$")

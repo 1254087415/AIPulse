@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 from sqlalchemy import select, update
 
@@ -23,7 +22,6 @@ from aipulse.core.datetime_utils import to_utc
 from aipulse.hotspot.models import Hotspot
 from aipulse.models.followed_up import FollowedUp
 from aipulse.store.database import get_session_maker
-
 
 logger = logging.getLogger(__name__)
 
@@ -313,7 +311,7 @@ async def _scan_one(fu: FollowedUp) -> ScanOutcome:
     new_count = 0
     new_hotspots: list[Hotspot] = []
     new_bvids: list[str] = []
-    latest_bvid: Optional[str] = None
+    latest_bvid: str | None = None
     for v in videos:
         try:
             new_hs = await upsert_hotspot_from_video(fu, v)
