@@ -935,13 +935,15 @@ export const FOLLOW_FIXTURES = {
 
 ### 3.5 Obsidian Vault（`TC-API-OBSIDIAN-VAULT-*`）
 
-#### `TC-API-OBSIDIAN-VAULT-01` `GET /api/settings/obsidian-vault/candidates` 返回扫描结果
+#### `TC-API-OBSIDIAN-VAULT-01` `POST /api/settings/obsidian-vault/scan` 返回扫描结果
 
-- **断言**：返回 `[{ path, mtime, contains_obsidian_dir: true }]`，至少含 macOS 标准路径 + CWD 上扫路径
+> 2026-07-30 口径回写：实现为 `POST /scan`（非 `GET /candidates`），返回字段 `{ path, exists, note }`（非 `{ path, mtime, contains_obsidian_dir }`），仅扫 `DEFAULT_VAULT_CANDIDATES` + CWD 上扫 5 级，不下沉子目录。单测契约见 `tests/unit/test_obsidian_vault_scan.py`。
 
-#### `TC-API-OBSIDIAN-VAULT-02` 候选路径中含 `.obsidian/` 标记
+- **断言**：返回 `[{ path, exists, note }]`，至少含 macOS 标准路径 + CWD 上扫路径
 
-- **断言**：每个 candidate 都有 `contains_obsidian_dir` 布尔字段
+#### `TC-API-OBSIDIAN-VAULT-02` 候选路径的 exists 标记
+
+- **断言**：每个 candidate 都有 `exists` 布尔字段（标记路径是否真实存在）
 
 #### `TC-API-OBSIDIAN-VAULT-03` `POST /api/settings/obsidian-vault` 持久化路径
 
@@ -1372,11 +1374,15 @@ export const FOLLOW_FIXTURES = {
 
 #### `TC-E2E-PATH-E-01` 在 ~/Documents 建 vault（含 `.obsidian/`）
 
-#### `TC-E2E-PATH-E-02` 重启 sidecar → `/candidates` 返回该路径
+#### `TC-E2E-PATH-E-02` 重启 sidecar → `POST /scan` 候选含该路径的父目录（`~/Documents`，`exists=true`）
+
+> 2026-07-30 口径回写：实现只扫 DEFAULTS + CWD 上扫，不下沉 `.obsidian/` 子目录，新建 vault 本身不会出现在 candidates；E2E 实际断言父目录存在（见 `tests/e2e/test_path_e_vault_scan.py`）。
 
 #### `TC-E2E-PATH-E-03` 前端点「选择 vault」→ 选另一目录 → POST
 
-#### `TC-E2E-PATH-E-04` 重启后 .env 中 `OBSIDIAN_VAULT_PATH` 已更新
+#### `TC-E2E-PATH-E-04` 重启后 `data/settings.json` 中 `obsidian_vault_path` 已更新
+
+> 2026-07-30 口径回写：持久层是 `data/settings.json`（`AppSettings.save()`），非 `.env`（设计如此，见 `src/aipulse/core/config.py`）。
 
 #### `TC-E2E-PATH-E-05` 设置页显示当前 vault 路径 + 「重新扫描」按钮
 
