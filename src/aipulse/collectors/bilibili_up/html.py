@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 import httpx
@@ -183,13 +183,13 @@ class BilibiliUpHtmlCollector(BaseBilibiliUpCollector):
 def _parse_pubdate(s: str) -> datetime:
     """解析 bili-video-card 的 pubdate 属性。"""
     if not s:
-        return datetime.now()
+        return datetime.now(UTC)
     s = s.strip()
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d", "%Y/%m/%d %H:%M"):
         try:
-            return datetime.strptime(s, fmt)
+            return datetime.strptime(s, fmt).replace(tzinfo=UTC)
         except ValueError:
             continue
     if s.isdigit():
-        return datetime.fromtimestamp(int(s))
-    return datetime.now()
+        return datetime.fromtimestamp(int(s), tz=UTC)
+    return datetime.now(UTC)

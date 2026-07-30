@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aipulse.core.datetime_utils import now_utc
 from aipulse.store.models import RssEntry, RssFeed, Task
 
 
@@ -45,7 +46,7 @@ class TaskRepository:
         task.status = status
         if error_message is not None:
             task.error_message = error_message
-        task.updated_at = datetime.utcnow()
+        task.updated_at = now_utc()
         await self.session.flush()
         await self.session.refresh(task)
         return task
@@ -57,7 +58,7 @@ class TaskRepository:
             return None
         for key, value in fields.items():
             setattr(task, key, value)
-        task.updated_at = datetime.utcnow()
+        task.updated_at = now_utc()
         await self.session.flush()
         await self.session.refresh(task)
         return task
@@ -111,7 +112,7 @@ class RssFeedRepository:
         feed = await self.session.get(RssFeed, feed_id)
         if feed is None:
             return None
-        feed.last_fetched_at = datetime.utcnow()
+        feed.last_fetched_at = now_utc()
         await self.session.flush()
         await self.session.refresh(feed)
         return feed

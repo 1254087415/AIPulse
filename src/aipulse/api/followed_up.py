@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aipulse.core.datetime_utils import format_iso_utc
 from aipulse.hotspot.models import Hotspot
 from aipulse.models.followed_up_collections import FollowedUpCollection
 from aipulse.models.learning_events import LearningEvent
@@ -253,8 +254,8 @@ def _serialize_hotspot(hotspot: Hotspot) -> dict[str, Any]:
         "canonical_url": hotspot.canonical_url,
         "summary": hotspot.summary,
         "source_type": hotspot.source_type,
-        "published_at": hotspot.published_at.isoformat() if hotspot.published_at else None,
-        "created_at": hotspot.created_at.isoformat() if hotspot.created_at else None,
+        "published_at": format_iso_utc(hotspot.published_at),
+        "created_at": format_iso_utc(hotspot.created_at),
         "heat_score": hotspot.heat_score,
     }
 
@@ -266,9 +267,9 @@ def _serialize_sync_history(job: SummaryJob) -> dict[str, Any]:
         "title": job.title,
         "status": job.status,
         "error": job.error,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
-        "started_at": job.started_at.isoformat() if job.started_at else None,
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "created_at": format_iso_utc(job.created_at),
+        "started_at": format_iso_utc(job.started_at),
+        "completed_at": format_iso_utc(job.completed_at),
     }
 
 
@@ -461,9 +462,9 @@ async def get_followed_up_health_route(
         "data": {
             "id": record.id,
             "health": record.health,
-            "last_checked_at": record.last_checked_at.isoformat() if record.last_checked_at else None,
+            "last_checked_at": format_iso_utc(record.last_checked_at),
             "last_error": record.last_error,
-            "failed_at": record.failed_at.isoformat() if record.failed_at else None,
+            "failed_at": format_iso_utc(record.failed_at),
             "is_active": record.is_active,
         },
     }
@@ -520,9 +521,9 @@ async def _build_overview_response(
 
     health = {
         "health": record.health,
-        "last_checked_at": record.last_checked_at.isoformat() if record.last_checked_at else None,
+        "last_checked_at": format_iso_utc(record.last_checked_at),
         "last_error": record.last_error,
-        "failed_at": record.failed_at.isoformat() if record.failed_at else None,
+        "failed_at": format_iso_utc(record.failed_at),
         "is_active": record.is_active,
         "fetch_interval_minutes": record.fetch_interval_minutes,
         "status": record.status,
@@ -549,8 +550,8 @@ async def _build_overview_response(
             "video_id": j.video_id,
             "status": j.status,
             "title": j.title,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
-            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            "created_at": format_iso_utc(j.created_at),
+            "completed_at": format_iso_utc(j.completed_at),
             "error": j.error,
             "note_path": j.note_path,
         }
@@ -568,7 +569,7 @@ async def _build_overview_response(
         {
             "id": e.id,
             "title": e.title,
-            "scheduled_at": e.scheduled_at.isoformat() if e.scheduled_at else None,
+            "scheduled_at": format_iso_utc(e.scheduled_at),
             "learning_status": e.learning_status,
             "summary_note_path": e.summary_note_path,
             "platform": e.platform,
@@ -590,7 +591,7 @@ async def _build_overview_response(
             "platform_collection_id": c.platform_collection_id,
             "description": c.description,
             "video_count": c.video_count,
-            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "created_at": format_iso_utc(c.created_at),
         }
         for c in collections
     ]
@@ -704,9 +705,7 @@ async def _build_detail_response(
             "enabled": record.is_active,
             "strategy": record.collector_strategy,
             "interval_minutes": record.fetch_interval_minutes,
-            "last_checked_at": record.last_checked_at.isoformat()
-            if record.last_checked_at
-            else None,
+            "last_checked_at": format_iso_utc(record.last_checked_at),
             "last_error": record.last_error,
             "collections": collections_payload,
             "orphan_videos": orphan_videos,
@@ -787,7 +786,7 @@ async def list_followed_up_videos_route(
             "title": v.title,
             "collection_id": v.followed_up_collection_id,
             "status": v.decision_status,
-            "published_at": v.published_at.isoformat() if v.published_at else None,
+            "published_at": format_iso_utc(v.published_at),
             "hotspot_id": v.id,
         }
         for v in page_rows
@@ -834,7 +833,7 @@ async def list_followed_up_videos_by_uid_route(
             "title": v.title,
             "collection_id": v.followed_up_collection_id,
             "status": v.decision_status,
-            "published_at": v.published_at.isoformat() if v.published_at else None,
+            "published_at": format_iso_utc(v.published_at),
             "hotspot_id": v.id,
         }
         for v in page_rows

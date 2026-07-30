@@ -43,10 +43,10 @@ def _serialize(record: SummaryJobRecord) -> dict[str, Any]:
         "reminder_id": record.reminder_id,
         "steps_emitted": record.steps_emitted,
         "intermediate_steps": record.intermediate_steps,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-        "started_at": record.started_at.isoformat() if record.started_at else None,
-        "completed_at": record.completed_at.isoformat() if record.completed_at else None,
+        "created_at": format_iso_utc(record.created_at),
+        "updated_at": format_iso_utc(record.updated_at),
+        "started_at": format_iso_utc(record.started_at),
+        "completed_at": format_iso_utc(record.completed_at),
     }
 
 

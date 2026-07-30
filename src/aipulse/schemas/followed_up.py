@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+from aipulse.core.datetime_utils import format_iso_utc
 
 
 PlatformStr = Annotated[str, Field(min_length=1, max_length=16)]
@@ -23,6 +25,15 @@ DecisionStatusStr = Annotated[
     str,
     Field(pattern=r"^(pending|worth_learning|worth_notified|skipped|failed)$"),
 ]
+
+
+def _serialize_utc_datetime(_field_name: str) -> Any:
+    """Return a Pydantic field_serializer that emits ``+00:00`` offset."""
+
+    def _serializer(value: datetime | None) -> str | None:
+        return format_iso_utc(value)
+
+    return _serializer
 
 
 class FollowedUpBase(BaseModel):
@@ -105,6 +116,24 @@ class FollowedUpResponse(BaseModel):
     updated_at: datetime
     deleted_at: datetime | None = None
 
+    @field_serializer(
+        "last_checked_at",
+        "failed_at",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        check_fields=False,
+    )
+    def _serialize_datetime(self, value: datetime | None) -> str | None:
+        """v0.3 时区修复：所有 datetime 字段序列化必带 +00:00 偏移。
+
+        SQLite 读回 DATETIME 字段会丢 tzinfo，让 Pydantic 默认
+        ``isoformat()`` 输出无偏移字符串 → 前端 format.ts fallback
+        按 +08:00 误读 → 显示比真实慢 8 小时。这里走 format_iso_utc
+        统一归一为 UTC aware 后再序列化。
+        """
+        return format_iso_utc(value)
+
 
 class FollowedUpCollectionCreate(BaseModel):
     """Input schema for collections (collector-driven, not exposed in API)."""
@@ -132,3 +161,12 @@ class FollowedUpCollectionResponse(BaseModel):
     last_synced_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer(
+        "last_synced_at",
+        "created_at",
+        "updated_at",
+        check_fields=False,
+    )
+    def _serialize_datetime(self, value: datetime | None) -> str | None:
+        return format_iso_utc(value)

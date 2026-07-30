@@ -1,7 +1,7 @@
 """RSS news collector."""
 
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import feedparser  # type: ignore[import-untyped]
@@ -16,9 +16,9 @@ def _parse_date(value: time.struct_time | tuple[Any, ...] | None) -> datetime | 
     if value is None:
         return None
     if isinstance(value, time.struct_time):
-        return datetime.fromtimestamp(time.mktime(value))
+        return datetime.fromtimestamp(time.mktime(value), tz=UTC)
     if isinstance(value, tuple):
-        return datetime.fromtimestamp(time.mktime(value))
+        return datetime.fromtimestamp(time.mktime(value), tz=UTC)
     return None
 
 

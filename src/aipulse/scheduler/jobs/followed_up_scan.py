@@ -19,6 +19,7 @@ from sqlalchemy import select, update
 
 from aipulse.collectors.bilibili_up.base import UpVideo
 from aipulse.collectors.bilibili_up.factory import BilibiliUpCollectorFactory
+from aipulse.core.datetime_utils import to_utc
 from aipulse.hotspot.models import Hotspot
 from aipulse.models.followed_up import FollowedUp
 from aipulse.store.database import get_session_maker
@@ -29,13 +30,23 @@ logger = logging.getLogger(__name__)
 
 # ---------- 内部辅助 ----------
 async def _is_due(fu: FollowedUp, now: datetime) -> bool:
-    """判断 UP主是否到扫描时机。"""
+    """判断 UP主是否到扫描时机。
+
+    v0.3 时区修复：SQLite 存 DATETIME 时丢 tzinfo，DB 读出的
+    last_checked_at 可能是 naive（存量）也可能是 aware（修复后）。
+    调用方传的 now 统一是 aware UTC。直接比较 naive vs aware 会抛
+    ``TypeError``，所以 ``to_utc`` 在比较前做归一：naive 视为 UTC。
+    """
     if not fu.is_active or fu.deleted_at is not None:
         return False
     if fu.last_checked_at is None:
         return True
-    next_due = fu.last_checked_at + timedelta(minutes=fu.fetch_interval_minutes)
-    return now >= next_due
+    last_checked_utc = to_utc(fu.last_checked_at)
+    now_utc = to_utc(now)
+    if last_checked_utc is None or now_utc is None:
+        return False
+    next_due = last_checked_utc + timedelta(minutes=fu.fetch_interval_minutes)
+    return now_utc >= next_due
 
 
 def _has_running_loop() -> bool:

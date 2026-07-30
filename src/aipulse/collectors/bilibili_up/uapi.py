@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 import httpx
@@ -160,7 +160,7 @@ class BilibiliUpUapiCollector(BaseBilibiliUpCollector):
             return UpVideo(
                 bvid=bvid,
                 title=title or bvid,
-                pubdate=datetime.fromtimestamp(pub_ts) if pub_ts else datetime.now(),
+                pubdate=datetime.fromtimestamp(pub_ts, tz=UTC) if pub_ts else datetime.now(UTC),
                 duration_sec=int(item.get("duration") or 0),
                 description="",
                 cover_url=item.get("cover") or "",
