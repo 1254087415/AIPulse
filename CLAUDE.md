@@ -12,6 +12,10 @@ AIPulse 是一个桌面端 AI 内容/任务管理工具，采用 Tauri + Python 
 - 代码内部的命名、注释、变量名仍然遵循项目代码风格（英文）。
 - 这条规则适用于本项目的所有子系统（Tauri、Python、Vue、Extension）。
 
+## 工具兼容性约定
+
+- **禁止使用 `AskUserQuestion` 工具**：paseo 不兼容该工具（仅在 Kimi 模型宿主下可用），调用后用户无法正常作答。需要用户做选择时，直接用文字列出选项（如 `A/B/C` 或 `1/2/3`）让用户回复。
+
 ## 调研与需求分析前的 Grill-Me 流程
 
 > 在开展任何新功能、新模块或重大改动的**项目调研、需求分析、技术方案设计**之前，**必须先调用 `/grill-me <主题>` 进入方案拷问环节**。
@@ -105,6 +109,17 @@ AIPulse 是一个桌面端 AI 内容/任务管理工具，采用 Tauri + Python 
 - **mock server 端口必须在 `host_permissions` 内**（目前仅 `localhost:3456`）：用其他端口会触发 CORS 预检 `OPTIONS`，mock 必须回 `Access-Control-*`，否则真实 POST 被 Chromium 拦截。
 - **抖音 note 页**：`lf-security.bytegoofy.com` 通过 `document.write` 注入 parser-blocking 反爬脚本，永不 `document_idle` → content script 不执行。测试里加 `page.route('**/*bytegoofy.com/**', r => r.abort())`（只拦第三方脚本，页面内容仍是真实 Douyin）。
 - **Bilibili AI 字幕**：`aisubtitle.hdslb.com` 返回 `Access-Control-Allow-Origin: *`，请求须 `credentials: 'omit'`，否则被 Chromium 拒绝（见 `background.ts` / `bilibili-subtitles.ts`）。
+
+### 6. Native Messaging 归档链路陷阱（真实浏览器 E2E）
+
+- **链路**：popup → background `submitUrl` → **native messaging（生产路径）** → `com.aipulse.native_host` → Tauri binary `--native-messaging` → python sidecar → pipeline → Obsidian。HTTP fallback（`POST /api/videos/extract`）只是 E2E 桥（localhost:3456），**8000 端口的 FastAPI 没有该路由**，fallback 到 8000 必失败。
+- **manifest 安装**：`~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.aipulse.native_host.json`，`allowed_origins` 必须含扩展真实 ID（unpacked 扩展 ID 由加载路径推导：SHA256 前 16 字节 nibble 映射 a-p；或在 `lsof -p <chrome_pid> | grep "Local Extension Settings"` 里看）。
+- **TCC 陷阱**：Chrome 无权访问 `~/Documents` 时，manifest `path` 指向 `~/Documents` 下的 host 会被**静默拒绝**（connectNative 报 "Specified native messaging host not found"，无任何日志）。wrapper 必须放 `~/Documents` 之外（如 `~/.aipulse/`）。调试法：wrapper 里写一行 `echo ... >> /tmp/xxx.log` 确认 Chrome 是否拉起。
+- **Chrome 传参与 Tauri 模式**：Chrome 用 `argv[1]=chrome-extension://<id>/` 启动 host，而 Tauri binary 只有 `argv[1]=="--native-messaging"` 才进 native 模式 → manifest 的 `path` 必须指向 wrapper 脚本（`scripts/native-host-dev.sh`），由它 `exec aipulse-tauri --native-messaging "$@"`。wrapper 还要 `export PATH=.venv/bin:$PATH`（Rust host 用 `which python3` 找解释器）、`cd` 项目根（sidecar 读 `./data` 和 `.env`）、`unset *_proxy`（代理会让 douyin/yt-dlp 超时）。
+- **断连后的 sidecar 是孤儿进程**：扩展拿到 `task_id` 立即 `port.disconnect()` → Chrome 关 host stdin → sidecar stdout/stderr 全变 broken pipe，但 sidecar 会等到 pipeline 跑完才退出（`shutdown()` await）。因此：`_emit_notification` 必须吞 `OSError`；yt-dlp 必须 `"noprogress": True`（进度条写 stdout 会 `BrokenPipeError` 杀死下载）。
+- **target/release/aipulse 是拷贝**：Rust host 跑的是 `src-tauri/target/release/aipulse/desktop/sidecar.py`（打包资源），改完 `src/aipulse` 必须 `rsync -a --delete src/aipulse/ src-tauri/target/release/aipulse/` + `scripts/sync-sidecar-resources.sh`，否则跑的是旧代码。
+- **抖音短链会过期**：`v.douyin.com/xxx` 过期后 302 到 `www.douyin.com` 首页 → 「无法从链接中提取视频ID」。E2E 用实时视频长链 `www.douyin.com/video/<id>` 更稳。
+- **抖音分享 API 已失效**：`iesdouyin.com/web/api/v2/aweme/iteminfo` + `_ROUTER_DATA` 解析会被反爬打回 → `DouyinParser` 有 yt-dlp 兜底（走 Chrome cookies），不要再依赖分享 API 断言。
 
 ## 启动开发服务
 
