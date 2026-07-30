@@ -173,6 +173,7 @@ function onConfirmDelete() {
           :alt="detail.name"
           class="follow-detail-avatar"
           data-testid="follow-detail-avatar"
+          referrerpolicy="no-referrer"
           @error="($event.target as HTMLImageElement).style.visibility = 'hidden'"
         />
         <div class="follow-detail-id">
@@ -348,6 +349,8 @@ function onConfirmDelete() {
   max-width: 960px;
   margin: 0 auto;
   padding: 16px 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .follow-detail-back-btn {
@@ -427,6 +430,7 @@ function onConfirmDelete() {
 }
 
 .follow-detail-meta.panel {
+  display: block;
   background: var(--surface-elevated, #fff);
   border: 1px solid var(--border-subtle, #e5e5e5);
   border-radius: var(--radius-md, 10px);

@@ -9,12 +9,12 @@
  *   - ``orphan``  — used inside the 散落视频 section (visually muted)
  *
  * The component is purely presentational: it does not own any data fetching
- * or mutation. The SummarizeButton (spec §6.13) lives next to the open-in
- * link, but this round only wires the open-bilibili action — the summarize
- * button is rendered as a placeholder so the layout matches the spec.
+ * or mutation. The SummarizeButton (spec §6.13) is wired next to the
+ * open-in-bilibili link and manages its own SSE state.
  */
 import { computed } from 'vue'
 import { formatStatusLabel } from '../../lib/format'
+import SummarizeButton from '../buttons/SummarizeButton.vue'
 
 export interface VideoListItemVideo {
   bvid: string
@@ -65,6 +65,7 @@ const isOrphan = computed(() => props.variant === 'orphan')
       </span>
     </div>
     <div class="video-list-item__actions">
+      <SummarizeButton :bvid="video.bvid" />
       <a
         class="video-list-item__open"
         :href="bilibiliUrl"
