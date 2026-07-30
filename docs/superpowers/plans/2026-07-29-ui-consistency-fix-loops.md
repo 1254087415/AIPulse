@@ -99,7 +99,7 @@
 
 ## 9. 新增立项（Loop C verifier 挖出，非 UI loop 范围）
 
-- **[High] 后端时区缺陷**：ORM DATETIME 在 SQLite bind 丢 tzinfo，API 输出 naive UTC 字符串 → `frontend/src/lib/format.ts:59` fallback 按 +08:00 解释 → 前端时间比真实北京时间慢 8 小时（pre-existing，旧 toLocaleString 同样误读）。更严重：`src/aipulse/scheduler/jobs/followed_up_scan.py:38` `_is_due` 比较 naive/aware datetime 抛 `TypeError`，调度器扫描任务运行时崩溃（verifier 后端日志实捕）。`src/aipulse/store/repository.py:48,60,114` 仍在用 `datetime.utcnow()`。修复方向：后端统一存储/输出 tz-aware（或 API 序列化补 `+00:00`），format.ts 无需改。需后端单测覆盖 `_is_due` 时区比较。
+- [x] **[High] 后端时区缺陷**（已修复，分支 `backend/fix-timezone-naive-datetime`，4 commit：RED 测试 `4c5aac3` → 主修复 `e780aca` → 兼容收尾 `f4be438` → 复审补齐 `d1929ae`；verifier 两轮，终审 GREEN：unit+integration 709 绿、e2e 17/17、三条 High 直调实证输出带 `+00:00`、TypeError 不再现。修复策略：写 aware UTC / 读回 naive 后 `to_utc()` lazy 归一（无 migration）/ 序列化统一 `format_iso_utc()`，新增 `src/aipulse/core/datetime_utils.py`）：ORM DATETIME 在 SQLite bind 丢 tzinfo，API 输出 naive UTC 字符串 → `frontend/src/lib/format.ts:59` fallback 按 +08:00 解释 → 前端时间比真实北京时间慢 8 小时（pre-existing，旧 toLocaleString 同样误读）。更严重：`src/aipulse/scheduler/jobs/followed_up_scan.py:38` `_is_due` 比较 naive/aware datetime 抛 `TypeError`，调度器扫描任务运行时崩溃（verifier 后端日志实捕）。`src/aipulse/store/repository.py:48,60,114` 仍在用 `datetime.utcnow()`。修复方向：后端统一存储/输出 tz-aware（或 API 序列化补 `+00:00`），format.ts 无需改。需后端单测覆盖 `_is_due` 时区比较。
 - [Low] `format.ts:57` 纯日期串渲染为 `… 00:00`，「某日」误示为「当日零点」。
 - [Low] `JobsView.vue` 任务名 tooltip 仅 hover 可达，无键盘/触屏途径。
 - [Low] `FollowCard.vue` `imageFailed` 不随 avatarUrl 变化重置（路由切换会重建组件，风险极低）。
