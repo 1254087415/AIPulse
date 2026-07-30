@@ -63,6 +63,10 @@ export function submitViaNativeMessaging(payload: SubmitPayload): Promise<Submit
     };
 
     const disconnectListener = () => {
+      // Read lastError so Chrome doesn't log "Unchecked runtime.lastError":
+      // after submit_url resolves we disconnect immediately and Chrome kills
+      // the host, which surfaces "Native host has exited" on this port.
+      void chrome.runtime.lastError;
       port.onMessage.removeListener(messageListener);
       port.onDisconnect.removeListener(disconnectListener);
       if (!resolved) {

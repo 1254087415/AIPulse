@@ -176,6 +176,27 @@ class TestEmitNotificationFallback:
         assert mock_stdout.flush.called
 
     @pytest.mark.unit
+    async def test_emit_notification_swallows_broken_pipe(self, sidecar: Sidecar) -> None:
+        """客户端断开后 stdout 是 broken pipe，通知失败不能杀死 pipeline"""
+        sidecar._write_line = None
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.write.side_effect = BrokenPipeError(32, "Broken pipe")
+            await sidecar.emit_progress("tk1", "running", 30, "msg")
+            await sidecar.emit_complete("tk1", "success", result={"x": 1})
+        # 缓存状态仍正常更新
+        assert sidecar._tasks["tk1"]["status"] == "success"
+
+    @pytest.mark.unit
+    async def test_emit_notification_swallows_write_line_oserror(self, sidecar: Sidecar) -> None:
+        """_write_line 回调抛 OSError 时同样容错"""
+        def _boom(line: str) -> None:
+            raise OSError("host gone")
+
+        sidecar._write_line = _boom
+        await sidecar.emit_progress("tk2", "running", 10, "msg")
+        assert sidecar._tasks["tk2"]["status"] == "running"
+
+    @pytest.mark.unit
     async def test_emit_complete_success_sets_progress_100(self, sidecar: Sidecar) -> None:
         """emit_complete status='success' → cached 里 progress_pct 被覆盖成 100"""
         lines: list[str] = []

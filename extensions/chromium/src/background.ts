@@ -574,19 +574,24 @@ function handleTabUpdated(tabId: number, changeInfo: chrome.tabs.TabChangeInfo):
   if (!changeInfo.url) return;
   const navigatedUrl = changeInfo.url;
   void (async () => {
-    const map = await loadFoundLinksByTab();
-    const entry = parseTabEntry(map[String(tabId)]);
-    // Same-document URL tweaks (history.replaceState query/hash changes, e.g.
-    // Bilibili's ?t= playback-position updates) are not navigations — the content
-    // script does not re-run, so the stored links are still valid. Keep them.
-    if (entry?.url && isSamePageUrl(entry.url, navigatedUrl)) return;
+    try {
+      const map = await loadFoundLinksByTab();
+      const entry = parseTabEntry(map[String(tabId)]);
+      // Same-document URL tweaks (history.replaceState query/hash changes, e.g.
+      // Bilibili's ?t= playback-position updates) are not navigations — the content
+      // script does not re-run, so the stored links are still valid. Keep them.
+      if (entry?.url && isSamePageUrl(entry.url, navigatedUrl)) return;
 
-    await removeFoundLinksForTab(tabId);
-    await setBadgeCount(0, tabId);
-    if (!isSupportedPage(navigatedUrl)) {
-      // No content script will run on the new page to re-report, so the global
-      // badge would otherwise keep showing the previous tab's count forever.
-      await setBadgeCount(0);
+      await removeFoundLinksForTab(tabId);
+      await setBadgeCount(0, tabId);
+      if (!isSupportedPage(navigatedUrl)) {
+        // No content script will run on the new page to re-report, so the global
+        // badge would otherwise keep showing the previous tab's count forever.
+        await setBadgeCount(0);
+      }
+    } catch {
+      // The tab may close between the event and these async calls; badge
+      // updates for a dead tabId reject with "No tab with id". Harmless.
     }
   })();
 }

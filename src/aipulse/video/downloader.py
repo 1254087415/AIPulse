@@ -23,6 +23,10 @@ class VideoDownloader:
             "format": "bestaudio/best",
             "outtmpl": str(work_dir / "%(title)s.%(ext)s"),
             "quiet": True,
+            # The sidecar may outlive its native-messaging client; progress
+            # output would hit the dead stdout pipe and abort the download
+            # with BrokenPipeError.
+            "noprogress": True,
             "noplaylist": True,
         }
         if settings.ytdlp_user_agent:

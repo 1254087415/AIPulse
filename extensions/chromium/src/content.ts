@@ -69,6 +69,11 @@ function safeSendMessage(message: unknown): Promise<SendMessageEnvelope | undefi
 }
 
 async function scanAndReport() {
+  // Orphaned content script (the extension was reloaded while this page was
+  // open): chrome.runtime.id disappears and sendMessage would throw
+  // "Extension context invalidated". Stay quiet — a page refresh re-injects
+  // a live content script.
+  if (typeof chrome === 'undefined' || !chrome.runtime?.id) return;
   try {
     const links = await extractAllLinks(document, window.location.href);
     const deduped = dedupeLinks(links);
