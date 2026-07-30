@@ -1,6 +1,7 @@
 """OpenAI-compatible LLM adapter."""
 
 import logging
+import re
 
 from openai import APIError, AsyncOpenAI, RateLimitError
 from openai.types.chat import ChatCompletionMessageParam
@@ -11,6 +12,21 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.minimaxi.com/v1"
 DEFAULT_MODEL = "MiniMax-M2.5"
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_UNCLOSED_THINK_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(content: str) -> str:
+    """Remove reasoning-model ``<think>`` blocks from a completion.
+
+    Reasoning models (MiniMax-M2.5, DeepSeek-R1, ...) may inline their chain
+    of thought in ``content``; it must not leak into generated notes.
+    """
+    stripped = _THINK_BLOCK_RE.sub("", content)
+    # Truncated completion with an unclosed <think> tag: drop the fragment.
+    stripped = _UNCLOSED_THINK_RE.sub("", stripped)
+    return stripped.strip()
 
 
 class OpenAICompatibleAdapter:
@@ -61,4 +77,7 @@ class OpenAICompatibleAdapter:
         content = response.choices[0].message.content
         if content is None or content.strip() == "":
             raise RuntimeError("LLM returned empty response")
-        return content
+        cleaned = _strip_reasoning(content)
+        if not cleaned:
+            raise RuntimeError("LLM returned empty response")
+        return cleaned
