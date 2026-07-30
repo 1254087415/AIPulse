@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aipulse.core.datetime_utils import format_iso_utc
 from aipulse.repositories.summary_job_repo import (
     SqlAlchemySummaryJobRepository,
     SummaryJobRecord,
