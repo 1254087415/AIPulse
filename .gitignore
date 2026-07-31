@@ -177,9 +177,9 @@ data/
 .claude/
 docs/_build/
 
-# Screenshots: 已 tracked PNG (spec05-* 等) 保留追踪; 未来新 PNG 默认忽略,
-# 需要时显式 `git add -f docs/.screenshots/<file>.png`
-docs/.screenshots/*.png
+# Screenshots: docs/.screenshots 下的图片默认不提交；
+# 如需保留特定证据，请显式 `git add -f docs/.screenshots/<file>`
+docs/.screenshots/
 # 验收上传证据: 已 tracked 历史图保留; 新的 verifier 截图默认忽略,
 # 需要保留请 `git add -f docs/superpowers/verifications/<file>.png`
 docs/superpowers/verifications/*.png
