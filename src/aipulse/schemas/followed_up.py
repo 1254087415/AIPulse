@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from aipulse.core.datetime_utils import format_iso_utc
 
@@ -72,7 +72,13 @@ class FollowedUpCreate(BaseModel):
 
 
 class FollowedUpUpdate(BaseModel):
-    """Partial update schema (PATCH semantics). All fields optional."""
+    """Partial update schema (PATCH semantics). All fields optional.
+
+    spec §6.12 ships ``enabled`` as the canonical pause/resume payload
+    (mirrors the ``enabled`` field returned by ``GET /detail``), while the
+    persistence column is ``is_active``. Accept both names; ``enabled``
+    wins when both are present. They must agree when both are provided.
+    """
 
     model_config = ConfigDict(from_attributes=True, frozen=True)
 
@@ -80,8 +86,26 @@ class FollowedUpUpdate(BaseModel):
     collector_strategy: CollectorStrategyStr | None = None
     fetch_interval_minutes: int | None = Field(default=None, ge=1, le=10080)
     is_active: bool | None = None
+    # spec §6.12 canonical pause/resume field. Coerced onto is_active in the
+    # model_validator below; the repository layer never sees this alias.
+    enabled: bool | None = None
     status: StatusStr | None = None
     config: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_enabled(cls, data):
+        if not isinstance(data, dict):
+            return data
+        enabled = data.get("enabled")
+        is_active = data.get("is_active")
+        if enabled is not None and is_active is not None and bool(enabled) != bool(is_active):
+            raise ValueError(
+                "`enabled` and `is_active` disagree; send only one or matching values"
+            )
+        if enabled is not None and is_active is None:
+            data["is_active"] = enabled
+        return data
 
 
 class FollowedUpResponse(BaseModel):

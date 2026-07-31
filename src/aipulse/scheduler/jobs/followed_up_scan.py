@@ -21,6 +21,7 @@ from aipulse.collectors.bilibili_up.factory import BilibiliUpCollectorFactory
 from aipulse.core.datetime_utils import to_utc
 from aipulse.hotspot.models import Hotspot
 from aipulse.models.followed_up import FollowedUp
+from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
 from aipulse.store.database import get_session_maker
 
 logger = logging.getLogger(__name__)
@@ -218,7 +219,10 @@ async def scan_followed_up_by_id(followed_up_id: str) -> ScanOutcome:
     v0.3 round 6 升级：返回 :class:`ScanOutcome`（同时含新 hotspot 数 +
     enqueue 的 summary job 数 + 新 bvid 列表）—— 让 sync 一次返回把
     「数据收集 + agent 摘要触发 + 三向归档」三件事都报告给前端。
-    失败返回空 ``ScanOutcome()`` 且记日志（不抛）。
+
+    找不到或已软删 → 抛 :class:`FollowedUpNotFoundError`，由 API 层
+    翻成 404。L1 #3：原本静默 ``ScanOutcome()`` 会让 sync 路由
+    返 202 + ``new_videos: 0``，掩盖不存在的事实。
     """
     async with get_session_maker()() as s:
         fu = (
@@ -226,7 +230,7 @@ async def scan_followed_up_by_id(followed_up_id: str) -> ScanOutcome:
         ).scalar_one_or_none()
     if fu is None or fu.deleted_at is not None:
         logger.warning("[scan] followed_up %s not found or deleted", followed_up_id)
-        return ScanOutcome()
+        raise FollowedUpNotFoundError(f"FollowedUp id={followed_up_id} not found")
     return await _scan_one(fu)
 
 

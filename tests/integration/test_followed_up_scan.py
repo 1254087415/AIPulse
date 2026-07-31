@@ -98,11 +98,12 @@ class TestScanById:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
-    async def test_scan_followed_up_by_id_not_found_returns_zero(self):
-        result = await scan_followed_up_by_id("nonexistent-id")
-        # v0.3 round 6: ScanOutcome
-        assert result.new_hotspots == 0
-        assert result.enqueued_summaries == 0
+    async def test_scan_followed_up_by_id_not_found_raises(self):
+        """L1 #3：未知 id 必须 raise，不能静默返空 ScanOutcome。"""
+        from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
+
+        with pytest.raises(FollowedUpNotFoundError):
+            await scan_followed_up_by_id("nonexistent-id")
 
     @pytest.mark.integration
     @pytest.mark.asyncio
@@ -178,12 +179,9 @@ class TestSyncApi:
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_sync_endpoint_404_for_missing_followed_up(self, client):
+        """L1 #3：sync 对未知 id 必须 404，不能返伪 202 + new_videos=0。"""
         sync_resp = await client.post("/api/followed-up/nonexistent/sync")
-        # 501 → 502 (sync failed) 因为 scan_followed_up_by_id 返回 0 而不抛
-        # 但 502 不该有 — 我看代码 _scan_one 不抛异常 → 0 → ok
-        assert sync_resp.status_code == 202
-        body = sync_resp.json()["data"]
-        assert body["new_videos"] == 0
+        assert sync_resp.status_code == 404
 
 
 class TestValidateEndpoint:

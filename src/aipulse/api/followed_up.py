@@ -292,14 +292,20 @@ async def update_followed_up_route(
     payload: FollowedUpUpdate,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Partially update a FollowedUp."""
+    """Partially update a FollowedUp.
+
+    L1 #1+#2：``{id}`` 既接受 DB UUID 也接受平台 uid（bilibili mid），
+    解析后再走 ``repo.update``。``enabled`` 已在 ``FollowedUpUpdate`` 的
+    model_validator 中归一到 ``is_active``，此处只透传 ``is_active``。
+    """
+    record = await _find_followed_up(session, followed_up_id)
     repo = SqlAlchemyFollowedUpRepository(session)
+    values = payload.model_dump(exclude_unset=True)
+    # drop the alias — repo only knows is_active
+    values.pop("enabled", None)
     try:
-        record = await repo.update(
-            followed_up_id,
-            **payload.model_dump(exclude_unset=True),
-        )
-    except FollowedUpNotFoundError as exc:
+        updated = await repo.update(record.id, **values)
+    except FollowedUpNotFoundError as exc:  # pragma: no cover - race
         await session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -307,7 +313,7 @@ async def update_followed_up_route(
     await session.commit()
     return {
         "success": True,
-        "data": FollowedUpResponse.model_validate(record).model_dump(),
+        "data": FollowedUpResponse.model_validate(updated).model_dump(),
     }
 
 
@@ -316,15 +322,19 @@ async def delete_followed_up_route(
     followed_up_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Soft-delete a FollowedUp."""
+    """Soft-delete a FollowedUp.
+
+    L1 #1：``{id}`` 接受 DB UUID 或平台 uid。
+    """
+    record = await _find_followed_up(session, followed_up_id)
     repo = SqlAlchemyFollowedUpRepository(session)
     try:
-        await repo.soft_delete(followed_up_id)
-    except FollowedUpNotFoundError as exc:
+        await repo.soft_delete(record.id)
+    except FollowedUpNotFoundError as exc:  # pragma: no cover - race
         await session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
-    return {"success": True, "data": {"id": followed_up_id}}
+    return {"success": True, "data": {"id": record.id}}
 
 
 @router.post("/validate")
@@ -401,6 +411,7 @@ async def validate_followed_up_route(
 @router.post("/{followed_up_id}/sync", status_code=202)
 async def sync_followed_up_route(
     followed_up_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """Phase 2 v0.3 spec §4.10 — 触发单个 UP主立即同步。
 
@@ -410,32 +421,43 @@ async def sync_followed_up_route(
     后台跑 6 个 @tool 落 DB / Obsidian / Apple Reminder。
     行为：调 ``scan_followed_up_by_id()``；15 秒超时；超时返回 202 + job id。
     失败返回 404 (UP主不存在) / 502 (上游失败)。
+
+    L1 #1+#3：
+    - ``{followed_up_id}`` 接受 DB UUID 或平台 uid（bilibili mid）。
+    - 未知记录：``scan_followed_up_by_id`` 现抛 ``FollowedUpNotFoundError``，
+      这里直接翻成 404，而不是返 202 + ``new_videos: 0`` 的伪成功。
     """
     from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
 
+    record = await _find_followed_up(session, followed_up_id)
+    resolved_id = record.id
+
     try:
         outcome = await asyncio.wait_for(
-            scan_followed_up_by_id(followed_up_id),
+            scan_followed_up_by_id(resolved_id),
             timeout=15.0,
         )
+    except FollowedUpNotFoundError as exc:
+        # 解析时还存在但扫描时已被软删（race）。翻 404。
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except asyncio.TimeoutError:
-        logger.info("[sync] followed_up %s sync hit 15s timeout", followed_up_id)
+        logger.info("[sync] followed_up %s sync hit 15s timeout", resolved_id)
         return {
             "success": True,
             "data": {
-                "followed_up_id": followed_up_id,
+                "followed_up_id": resolved_id,
                 "status": "timeout",
                 "message": "扫描超时，已切到后台；前端可通过 /api/followed-up/{id}/health 拉进度",
             },
         }
     except Exception as exc:  # noqa: BLE001
-        logger.exception("[sync] followed_up %s sync failed: %s", followed_up_id, exc)
+        logger.exception("[sync] followed_up %s sync failed: %s", resolved_id, exc)
         raise HTTPException(status_code=502, detail=f"sync failed: {exc}") from exc
 
     return {
         "success": True,
         "data": {
-            "followed_up_id": followed_up_id,
+            "followed_up_id": resolved_id,
             "status": "ok",
             "new_videos": outcome.new_hotspots,
             # v0.3 round 6: sync 现在也入队 summary job；前端可据此轮询
@@ -451,11 +473,11 @@ async def get_followed_up_health_route(
     followed_up_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Phase 2 v0.3 spec §4.10 — 健康状态详情（用于面板渲染状态徽章）。"""
-    repo = SqlAlchemyFollowedUpRepository(session)
-    record = await repo.find_by_id(followed_up_id)
-    if record is None or record.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    """Phase 2 v0.3 spec §4.10 — 健康状态详情（用于面板渲染状态徽章）。
+
+    L1 #1：``{followed_up_id}`` 接受 DB UUID 或平台 uid。
+    """
+    record = await _find_followed_up(session, followed_up_id)
 
     return {
         "success": True,
@@ -475,15 +497,14 @@ async def get_followed_up_overview_route(
     followed_up_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """Phase 7 v0.3 spec §G8 — UP主详情页数据汇总（按 db id）。
+    """Phase 7 v0.3 spec §G8 — UP主详情页数据汇总（按 db id 或 uid）。
 
     聚合：基础信息 + health + 最近的 10 个 job + 最近的 10 个 learning event
     + 最近 10 个 collection。前端 single-page 渲染。
+
+    L1 #1：``{followed_up_id}`` 接受 DB UUID 或平台 uid。
     """
-    followed_repo = SqlAlchemyFollowedUpRepository(session)
-    record = await followed_repo.find_by_id(followed_up_id)
-    if record is None or record.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="FollowedUp not found")
+    record = await _find_followed_up(session, followed_up_id)
     return await _build_overview_response(record, session)
 
 
