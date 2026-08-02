@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aipulse.core.datetime_utils import format_iso_utc
@@ -174,11 +174,32 @@ async def list_followed_up_route(
     """List FollowedUp rows, newest first."""
     repo = SqlAlchemyFollowedUpRepository(session)
     records = await repo.list_all(include_deleted=include_deleted)
+    record_ids = [record.id for record in records]
+    video_count_by_id: dict[str, int] = {}
+    if record_ids:
+        stmt_counts = (
+            select(
+                Hotspot.followed_up_id,
+                func.count(Hotspot.id),
+            )
+            .where(Hotspot.followed_up_id.in_(record_ids))
+            .group_by(Hotspot.followed_up_id)
+        )
+        count_rows = (await session.execute(stmt_counts)).all()
+        video_count_by_id = {
+            followed_up_id: int(video_count or 0)
+            for followed_up_id, video_count in count_rows
+            if followed_up_id is not None
+        }
+    data: list[dict[str, Any]] = []
+    for record in records:
+        item = FollowedUpResponse.model_validate(record).model_dump()
+        item["mid"] = record.uid
+        item["video_count"] = video_count_by_id.get(record.id, 0)
+        data.append(item)
     return {
         "success": True,
-        "data": [
-            FollowedUpResponse.model_validate(r).model_dump() for r in records
-        ],
+        "data": data,
     }
 
 

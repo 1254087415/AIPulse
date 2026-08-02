@@ -116,6 +116,7 @@ class FollowedUpResponse(BaseModel):
     id: str
     platform: PlatformStr
     uid: UidStr
+    mid: str | None = None
     display_name: DisplayNameStr
     profile_url: ProfileUrlStr
     collector_strategy: CollectorStrategyStr
@@ -131,6 +132,7 @@ class FollowedUpResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    video_count: int = Field(default=0, ge=0)
 
     @field_serializer(
         "last_checked_at",

@@ -18,6 +18,7 @@ interface Props {
   show: boolean
   title: string
   message: string
+  errorMessage?: string | null
   confirmText?: string
   cancelText?: string
   loading?: boolean
@@ -26,6 +27,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  errorMessage: null,
   confirmText: '确认',
   cancelText: '取消',
   loading: false,
@@ -96,6 +98,9 @@ onBeforeUnmount(() => {
     >
       <h2 class="ui-confirm__title">{{ title }}</h2>
       <p class="ui-confirm__message">{{ message }}</p>
+      <p v-if="errorMessage" class="ui-confirm__error" :data-testid="`${testIds.root}-error`" role="alert">
+        {{ errorMessage }}
+      </p>
       <div class="ui-confirm__actions">
         <button
           type="button"
@@ -153,6 +158,16 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-secondary, #555);
+}
+
+.ui-confirm__error {
+  margin: 0 0 16px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--status-red, #ef4444) 12%, transparent);
+  color: var(--status-red, #ef4444);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .ui-confirm__actions {

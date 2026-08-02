@@ -25,6 +25,7 @@ const emit = defineEmits<{
   (e: 'remove', id: string): void
   (e: 'sync', id: string): void
   (e: 'edit', id: string): void
+  (e: 'toggle', id: string, enabled: boolean): void
 }>()
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -79,6 +80,7 @@ const lastErrorSummary = computed(() => summarizeError(props.followed.last_error
 const onRemove = (): void => emit('remove', props.followed.id)
 const onSync = (): void => emit('sync', props.followed.id)
 const onEdit = (): void => emit('edit', props.followed.id)
+const onToggle = (): void => emit('toggle', props.followed.id, !props.followed.is_active)
 </script>
 
 <template>
@@ -110,6 +112,12 @@ const onEdit = (): void => emit('edit', props.followed.id)
       </div>
 
       <p class="follow-card__line">
+        <span class="follow-card__label">mid</span>
+        <code data-testid="mid">{{ followed.mid ?? followed.uid }}</code>
+        <span class="follow-card__sep">·</span>
+        <span class="follow-card__label">视频</span>
+        <span data-testid="video-count">{{ followed.video_count ?? 0 }}</span>
+        <span class="follow-card__sep">·</span>
         <span class="follow-card__label">上次同步</span>
         <time :datetime="followed.last_checked_at ?? ''">{{ lastCheckedLabel }}</time>
         <span class="follow-card__sep">·</span>
@@ -129,6 +137,14 @@ const onEdit = (): void => emit('edit', props.followed.id)
 
     <div class="follow-card__actions">
       <slot name="detail" />
+      <AppButton
+        size="sm"
+        variant="secondary"
+        data-testid="toggle-enabled-button"
+        @click="onToggle"
+      >
+        {{ followed.is_active ? '停用' : '启用' }}
+      </AppButton>
       <AppButton
         size="sm"
         variant="secondary"
