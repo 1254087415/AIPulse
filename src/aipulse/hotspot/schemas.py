@@ -22,6 +22,7 @@ class HotspotOut(BaseModel):
     heat_score: float
     importance: str
     category: str | None
+    status: str
     published_at: datetime | None
 
 

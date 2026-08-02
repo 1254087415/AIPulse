@@ -8,7 +8,7 @@
  *  - Inactive items carry `transition: none` on background-color so the
  *    active-state swap is instantaneous; only :hover adds the 150ms ease-out
  *    transition.
- *  - Active background is `rgba(var(--signal-rgb), 0.06)` (not hardcoded sRGB).
+ *  - Active background is `rgb(var(--signal-rgb) / 0.06)` (not hardcoded sRGB).
  *
  * jsdom's cssRules surface is unreliable for scoped styles, so we read the
  * CSS source string for the SidebarNav component and assert the contract
@@ -57,15 +57,15 @@ describe('D2 Sidebar — spec §6.8 tokens + active marker', () => {
     expect(css).toMatch(/--ink-rgb:\s*\d+\s+\d+\s+\d+/)
   })
 
-  it('uses rgba(var(--signal-rgb), 0.06) for --sidebar-active-bg', () => {
+  it('uses valid rgb(var(--signal-rgb) / 0.06) syntax for --sidebar-active-bg', () => {
     expect(css).toMatch(
-      /--sidebar-active-bg:\s*rgba\(var\(--signal-rgb\),\s*0\.06\)/,
+      /--sidebar-active-bg:\s*rgb\(var\(--signal-rgb\)\s*\/\s*0\.06\)/,
     )
   })
 
-  it('uses rgba(var(--ink-rgb), 0.04) for the hover overlay', () => {
+  it('uses valid rgb(var(--ink-rgb) / 0.04) syntax for the hover overlay', () => {
     expect(css).toMatch(
-      /--sidebar-hover-bg:\s*rgba\(var\(--ink-rgb\),\s*0\.04\)/,
+      /--sidebar-hover-bg:\s*rgb\(var\(--ink-rgb\)\s*\/\s*0\.04\)/,
     )
   })
 })

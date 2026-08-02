@@ -34,6 +34,7 @@ def _make_hotspot_mock(hotspot_id: str, title: str) -> MagicMock:
         heat_score=1.0,
         importance="medium",
         category=None,
+        status="pending",
         published_at=datetime.now(UTC),
     )
 

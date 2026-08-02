@@ -10,19 +10,20 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
-import { formatDateTime, formatStatusLabel } from '../lib/format'
+import { formatDateTime, formatImportanceLabel, formatSourceLabel, formatStatusLabel } from '../lib/format'
 import { safeHref } from '../lib/safeUrl'
 
 interface Hotspot {
   id: string
-  title?: string | null
-  url?: string | null
-  source?: string | null
+  title: string
+  url: string
   summary?: string | null
-  status?: string | null
-  decision_status?: string | null
-  created_at?: string | null
-  archived_at?: string | null
+  status: string
+  source_type: string
+  heat_score: number
+  importance: string
+  category?: string | null
+  published_at?: string | null
 }
 
 const route = useRoute()
@@ -74,8 +75,11 @@ watch(() => hotspotId.value, (next) => void load(next))
     <article v-else class="hotspot-card">
       <h3 class="hotspot-card__title">{{ hotspot.title || hotspot.id }}</h3>
       <dl class="hotspot-card__meta">
-        <dt>来源</dt><dd>{{ hotspot.source || '—' }}</dd>
-        <dt>状态</dt><dd>{{ formatStatusLabel(hotspot.status || hotspot.decision_status || '—') }}</dd>
+        <dt>来源</dt><dd data-testid="hotspot-source">{{ formatSourceLabel(hotspot.source_type) }}</dd>
+        <dt>状态</dt><dd data-testid="hotspot-status">{{ formatStatusLabel(hotspot.status || '—') }}</dd>
+        <dt>重要性</dt><dd data-testid="hotspot-importance">{{ formatImportanceLabel(hotspot.importance) }}</dd>
+        <dt>分类</dt><dd data-testid="hotspot-category">{{ hotspot.category || '—' }}</dd>
+        <dt>热度</dt><dd data-testid="hotspot-score">{{ hotspot.heat_score.toFixed(1) }}</dd>
         <dt>URL</dt>
         <dd>
           <a v-if="safeUrl" :href="safeUrl" target="_blank" rel="noopener noreferrer">
@@ -83,8 +87,7 @@ watch(() => hotspotId.value, (next) => void load(next))
           </a>
           <span v-else>{{ hotspot.url || '—' }}</span>
         </dd>
-        <dt>创建时间</dt><dd>{{ formatDateTime(hotspot.created_at) }}</dd>
-        <dt>归档时间</dt><dd>{{ formatDateTime(hotspot.archived_at) }}</dd>
+        <dt>发布时间</dt><dd data-testid="hotspot-published">{{ formatDateTime(hotspot.published_at) }}</dd>
       </dl>
       <p v-if="hotspot.summary" class="hotspot-card__summary">{{ hotspot.summary }}</p>
     </article>

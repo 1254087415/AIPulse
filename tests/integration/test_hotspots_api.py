@@ -39,6 +39,7 @@ async def test_list_hotspots_returns_persisted_hotspot(client, db_session):
         heat_score=12.5,
         importance="high",
         category="tech",
+        status="new",
     )
     db_session.add(hotspot)
     await db_session.commit()
@@ -49,6 +50,7 @@ async def test_list_hotspots_returns_persisted_hotspot(client, db_session):
     assert len(body["data"]) == 1
     assert body["data"][0]["title"] == "Test Hotspot"
     assert body["data"][0]["source_type"] == "rss"
+    assert body["data"][0]["status"] == "new"
     assert body["meta"]["total"] == 1
 
 
@@ -109,6 +111,7 @@ async def test_get_hotspot_returns_item(client, db_session):
         source_id=source.id,
         source_type="rss",
         heat_score=5.0,
+        status="pending",
     )
     db_session.add(hotspot)
     await db_session.commit()
@@ -119,6 +122,7 @@ async def test_get_hotspot_returns_item(client, db_session):
     body = response.json()
     assert body["success"] is True
     assert body["data"]["title"] == "Single Hotspot"
+    assert body["data"]["status"] == "pending"
 
 
 @pytest.mark.integration
