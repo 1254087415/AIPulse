@@ -21,6 +21,8 @@ export interface FollowedUp {
   id: string
   platform: FollowedUpPlatform
   uid: string
+  /** Platform-native identifier (for Bilibili this is the numeric mid). */
+  mid?: string
   display_name: string
   profile_url: string
   collector_strategy: FollowedUpCollectorStrategy
@@ -35,6 +37,8 @@ export interface FollowedUp {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  /** Number of videos discovered for this followed account. */
+  video_count?: number
   config?: Record<string, unknown>
 }
 

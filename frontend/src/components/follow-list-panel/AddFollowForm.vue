@@ -8,6 +8,7 @@
  * has been removed; only B站 is supported in v0.3.
  */
 import { computed, ref } from 'vue'
+import AppButton from '../ui/AppButton.vue'
 import type { FollowedUpCreate } from '../../api/followedUp'
 
 interface Props {
@@ -89,23 +90,23 @@ const onCancel = (): void => emit('cancel')
     </p>
 
     <div class="add-follow-form__actions">
-      <button
-        type="button"
-        class="add-follow-form__btn add-follow-form__btn--ghost"
+      <AppButton
+        variant="ghost"
         data-testid="cancel-button"
         :disabled="submitting"
         @click="onCancel"
       >
         取消
-      </button>
-      <button
+      </AppButton>
+      <AppButton
         type="submit"
-        class="add-follow-form__btn add-follow-form__btn--primary"
+        variant="primary"
+        :loading="submitting"
         data-testid="submit-button"
-        :disabled="submitting || !isValidUrl"
+        :disabled="!isValidUrl"
       >
         {{ submitting ? '添加中…' : '添加' }}
-      </button>
+      </AppButton>
     </div>
   </form>
 </template>
@@ -170,42 +171,5 @@ const onCancel = (): void => emit('cancel')
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.add-follow-form__btn {
-  appearance: none;
-  height: 36px;
-  padding: 0 16px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease;
-}
-
-.add-follow-form__btn--ghost {
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
-
-.add-follow-form__btn--ghost:hover:not(:disabled) {
-  background: var(--surface-elevated-hover);
-  color: var(--text-primary);
-}
-
-.add-follow-form__btn--primary {
-  background: var(--accent-coral);
-  border: 1px solid var(--accent-coral);
-  color: var(--surface-elevated);
-}
-
-.add-follow-form__btn--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-coral) 88%, black);
-}
-
-.add-follow-form__btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 </style>

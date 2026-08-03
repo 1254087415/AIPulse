@@ -12,6 +12,10 @@ AIPulse 是一个桌面端 AI 内容/任务管理工具，采用 Tauri + Python 
 - 代码内部的命名、注释、变量名仍然遵循项目代码风格（英文）。
 - 这条规则适用于本项目的所有子系统（Tauri、Python、Vue、Extension）。
 
+## 工具兼容性约定
+
+- **禁止使用 `AskUserQuestion` 工具**：paseo 不兼容该工具（仅在 Kimi 模型宿主下可用），调用后用户无法正常作答。需要用户做选择时，直接用文字列出选项（如 `A/B/C` 或 `1/2/3`）让用户回复。
+
 ## 调研与需求分析前的 Grill-Me 流程
 
 > 在开展任何新功能、新模块或重大改动的**项目调研、需求分析、技术方案设计**之前，**必须先调用 `/grill-me <主题>` 进入方案拷问环节**。
@@ -105,6 +109,92 @@ AIPulse 是一个桌面端 AI 内容/任务管理工具，采用 Tauri + Python 
 - **mock server 端口必须在 `host_permissions` 内**（目前仅 `localhost:3456`）：用其他端口会触发 CORS 预检 `OPTIONS`，mock 必须回 `Access-Control-*`，否则真实 POST 被 Chromium 拦截。
 - **抖音 note 页**：`lf-security.bytegoofy.com` 通过 `document.write` 注入 parser-blocking 反爬脚本，永不 `document_idle` → content script 不执行。测试里加 `page.route('**/*bytegoofy.com/**', r => r.abort())`（只拦第三方脚本，页面内容仍是真实 Douyin）。
 - **Bilibili AI 字幕**：`aisubtitle.hdslb.com` 返回 `Access-Control-Allow-Origin: *`，请求须 `credentials: 'omit'`，否则被 Chromium 拒绝（见 `background.ts` / `bilibili-subtitles.ts`）。
+
+### 6. Native Messaging 归档链路陷阱（真实浏览器 E2E）
+
+- **链路**：popup → background `submitUrl` → **native messaging（生产路径）** → `com.aipulse.native_host` → Tauri binary `--native-messaging` → python sidecar → pipeline → Obsidian。HTTP fallback（`POST /api/videos/extract`）只是 E2E 桥（localhost:3456），**8000 端口的 FastAPI 没有该路由**，fallback 到 8000 必失败。
+- **manifest 安装**：`~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.aipulse.native_host.json`，`allowed_origins` 必须含扩展真实 ID（unpacked 扩展 ID 由加载路径推导：SHA256 前 16 字节 nibble 映射 a-p；或在 `lsof -p <chrome_pid> | grep "Local Extension Settings"` 里看）。
+- **TCC 陷阱**：Chrome 无权访问 `~/Documents` 时，manifest `path` 指向 `~/Documents` 下的 host 会被**静默拒绝**（connectNative 报 "Specified native messaging host not found"，无任何日志）。wrapper 必须放 `~/Documents` 之外（如 `~/.aipulse/`）。调试法：wrapper 里写一行 `echo ... >> /tmp/xxx.log` 确认 Chrome 是否拉起。
+- **Chrome 传参与 Tauri 模式**：Chrome 用 `argv[1]=chrome-extension://<id>/` 启动 host，而 Tauri binary 只有 `argv[1]=="--native-messaging"` 才进 native 模式 → manifest 的 `path` 必须指向 wrapper 脚本（`scripts/native-host-dev.sh`），由它 `exec aipulse-tauri --native-messaging "$@"`。wrapper 还要 `export PATH=.venv/bin:$PATH`（Rust host 用 `which python3` 找解释器）、`cd` 项目根（sidecar 读 `./data` 和 `.env`）、`unset *_proxy`（代理会让 douyin/yt-dlp 超时）。
+- **断连后的 sidecar 是孤儿进程**：扩展拿到 `task_id` 立即 `port.disconnect()` → Chrome 关 host stdin → sidecar stdout/stderr 全变 broken pipe，但 sidecar 会等到 pipeline 跑完才退出（`shutdown()` await）。因此：`_emit_notification` 必须吞 `OSError`；yt-dlp 必须 `"noprogress": True`（进度条写 stdout 会 `BrokenPipeError` 杀死下载）。
+- **target/release/aipulse 是拷贝**：Rust host 跑的是 `src-tauri/target/release/aipulse/desktop/sidecar.py`（打包资源），改完 `src/aipulse` 必须 `rsync -a --delete src/aipulse/ src-tauri/target/release/aipulse/` + `scripts/sync-sidecar-resources.sh`，否则跑的是旧代码。
+- **抖音短链会过期**：`v.douyin.com/xxx` 过期后 302 到 `www.douyin.com` 首页 → 「无法从链接中提取视频ID」。E2E 用实时视频长链 `www.douyin.com/video/<id>` 更稳。
+- **抖音分享 API 已失效**：`iesdouyin.com/web/api/v2/aweme/iteminfo` + `_ROUTER_DATA` 解析会被反爬打回 → `DouyinParser` 有 yt-dlp 兜底（走 Chrome cookies），不要再依赖分享 API 断言。
+
+## 启动开发服务
+
+> **每个 AI 工作时第一次必看**，避免花力气找启动方式。
+
+### 后端（Python sidecar / FastAPI）
+
+```bash
+cd ~/Documents/project/AIPulse
+uv run uvicorn aipulse.server:app --host 127.0.0.1 --port 8000
+# 后端实际源码在 src/aipulse/，不是 src-python/；src-python/ 路径已废弃
+# 占用 8000 端口；改 :18000 等非常用端口会让 verifier / Playwright 走错
+```
+
+健康检查：
+
+```bash
+curl -sS --max-time 3 http://127.0.0.1:8000/health    # → {"success":true,"data":{"status":"ok"}}
+```
+
+### 前端（Vue 3 + Vite）
+
+```bash
+cd ~/Documents/project/AIPulse/frontend
+pnpm dev --host 127.0.0.1 --port 5173
+```
+
+Vite 配置（`frontend/vite.config.ts`）：
+
+- `proxy.target` = `http://127.0.0.1:8000`（PR #5 已修，**不要回滚成 18000**）
+- `envDir: '..'` 让 Vite 从**项目根 .env** 读 `AIPULSE_API_TOKEN`
+- `envPrefix: ['VITE_', 'TAURI_', 'AIPULSE_API_TOKEN']`
+
+⚠️ **如果改了 vite proxy target，verifier / 真 Playwright 验证会撞 502。** 改后跑 `curl http://127.0.0.1:5173/api/sources` 确认可转发。
+
+### 并行启动（dashboard + 真 E2E 用）
+
+```bash
+# Terminal 1
+uv run uvicorn aipulse.server:app --host 127.0.0.1 --port 8000
+
+# Terminal 2
+cd frontend && pnpm dev --host 127.0.0.1 --port 5173
+```
+
+启动后浏览器打开 `http://127.0.0.1:5173/dashboard` 看到 6 sidebar 全部数据，**前提**是先有真 UP 主在 `data/aipulse.db` 的 `followed_up` 表里（没数据则页面 empty state）。
+
+### 数据 + 配置
+
+| 路径 | 说明 |
+|------|------|
+| `data/aipulse.db` | SQLite 主库；gitignored；schema 在 `data/` 有 snapshot 备份（`*.roundN-backup`） |
+| `data/settings.json` | 用户配置（Vault 路径、Secret 掩码、API Token 等）；gitignored |
+| `.env` | 项目根环境变量；含真 LLM API key（per `project_env-true-key-status` 用户不撤销） |
+| `.env.example` | 占位符版本；可提交 |
+
+⚠️ **.env 真 key 严禁 cat/echo 输出到日志**（per `project_secrets-leak-2026-07-26` Kimi key 泄漏事故）。grep 时只展示变量名，不展示值。
+
+### 进程清理
+
+遗留后台进程会留下 vestigial state（8000 / 5173 / 18000 端口）影响下次启动。结束时 kill：
+
+```bash
+lsof -nP -iTCP:5173 -iTCP:8000 -iTCP:18000 -sTCP:LISTEN
+kill <PID>    # 或 kill 5174 5175 等 vite 多余实例
+```
+
+### 故障排查
+
+| 症状 | 原因 | 修法 |
+|------|------|------|
+| 浏览器 `localhost:5173/api/*` 返 502 | 后端没起或 vite proxy 错 | 检查 :8000 是否 uvicorn 跑着；`grep target frontend/vite.config.ts` |
+| `/api/hotspots` 返 401 | `.env` 有 `AIPULSE_API_TOKEN` 但 frontend 没带 | vite 需从 `.env` 读（已配 envPrefix）；如 token 不一致就在 Settings → API 鉴权 重新填 |
+| `Failed to load resource` CORS | vite proxy 没生效 | 确认 `curl http://127.0.0.1:5173/api/health` 转发到后端 |
+| Apple Reminder osascript timeout | `create_reminder(executor_timeout_s=5)` 默认 5s 太短 | 调高；或先 `osascript -e 'tell application "Reminders" to ...'` 直接测试 |
 
 ## 不应出现在这里的
 

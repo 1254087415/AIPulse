@@ -17,11 +17,13 @@ export default defineConfig({
     host: 'localhost',
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:18000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => path,
       },
     },
   },
-  envPrefix: ['VITE_', 'TAURI_'],
+  // Vite and the loopback FastAPI sidecar must read the same local API token.
+  envDir: '..',
+  envPrefix: ['VITE_', 'TAURI_', 'AIPULSE_API_TOKEN'],
 })

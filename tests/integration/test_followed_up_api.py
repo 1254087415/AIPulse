@@ -6,6 +6,8 @@ import pytest
 import pytest_asyncio
 
 from aipulse.core.config import get_settings
+from aipulse.hotspot.models import Hotspot, Source
+from aipulse.store.database import get_session_maker
 from aipulse.store.database import reset_db
 
 
@@ -94,6 +96,57 @@ async def test_list_followed_up_returns_persisted(client):
     body = response.json()
     assert len(body["data"]) == 1
     assert body["data"][0]["display_name"] == "Existing User"
+    assert body["data"][0]["mid"] == "999"
+    assert body["data"][0]["video_count"] == 0
+
+
+@pytest.mark.integration
+async def test_list_followed_up_counts_related_hotspots(client):
+    """GET /api/followed-up returns a real video_count based on related hotspots."""
+    payload = {
+        "platform": "bilibili",
+        "uid": "998",
+        "display_name": "Counted User",
+        "profile_url": "https://space.bilibili.com/998",
+    }
+    create = await client.post("/api/followed-up", json=payload)
+    assert create.status_code == 201
+    record_id = create.json()["data"]["id"]
+
+    async with get_session_maker()() as session:
+        source = Source(name="bilibili", source_type="bilibili", collector_class="X")
+        session.add(source)
+        await session.flush()
+        session.add_all(
+            [
+                Hotspot(
+                    content_id="BVcount01",
+                    followed_up_id=record_id,
+                    title="counted-1",
+                    url="https://www.bilibili.com/video/BVcount01",
+                    canonical_url="https://www.bilibili.com/video/BVcount01",
+                    source_id=source.id,
+                    source_type="bilibili",
+                ),
+                Hotspot(
+                    content_id="BVcount02",
+                    followed_up_id=record_id,
+                    title="counted-2",
+                    url="https://www.bilibili.com/video/BVcount02",
+                    canonical_url="https://www.bilibili.com/video/BVcount02",
+                    source_id=source.id,
+                    source_type="bilibili",
+                ),
+            ],
+        )
+        await session.commit()
+
+    response = await client.get("/api/followed-up")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["data"]) == 1
+    assert body["data"][0]["mid"] == "998"
+    assert body["data"][0]["video_count"] == 2
 
 
 @pytest.mark.integration

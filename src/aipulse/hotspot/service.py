@@ -91,6 +91,7 @@ async def list_hotspots(
     source: str = "",
     importance: str = "",
     category: str = "",
+    decision_status: str = "",
     sort: str = "",
     order: str = "",
     page: int = 1,
@@ -106,10 +107,19 @@ async def list_hotspots(
         stmt = stmt.where(Hotspot.importance == importance)
     if category:
         stmt = stmt.where(Hotspot.category == category)
+    if decision_status:
+        statuses = [item.strip() for item in decision_status.split(",") if item.strip()]
+        if statuses:
+            if len(statuses) == 1:
+                stmt = stmt.where(Hotspot.decision_status == statuses[0])
+            else:
+                stmt = stmt.where(Hotspot.decision_status.in_(statuses))
 
     sort_column = Hotspot.heat_score
     if sort == "published_at":
         sort_column = Hotspot.published_at
+    elif sort == "created_at":
+        sort_column = Hotspot.created_at
     sort_order = sort_column.desc() if order == "asc" else sort_column.desc()
     if order == "asc":
         sort_order = sort_column.asc()
@@ -125,6 +135,32 @@ async def get_hotspot(session: AsyncSession, hotspot_id: str) -> Hotspot | None:
     return (
         await session.execute(select(Hotspot).where(Hotspot.id == hotspot_id))
     ).scalar_one_or_none()
+
+
+async def update_hotspot(
+    session: AsyncSession, hotspot_id: str, payload: dict[str, Any]
+) -> Hotspot | None:
+    """Apply a partial update to a hotspot row."""
+    hotspot = await session.get(Hotspot, hotspot_id)
+    if hotspot is None:
+        return None
+
+    if "status" in payload:
+        hotspot.status = payload["status"]
+    if "decision_status" in payload:
+        hotspot.decision_status = payload["decision_status"]
+    if "notified" in payload:
+        hotspot.notified = payload["notified"]
+    if "obsidian_source_path" in payload:
+        hotspot.obsidian_source_path = payload["obsidian_source_path"]
+    if "obsidian_summary_path" in payload:
+        hotspot.obsidian_summary_path = payload["obsidian_summary_path"]
+    if "learning_event_id" in payload:
+        hotspot.learning_event_id = payload["learning_event_id"]
+
+    await session.commit()
+    await session.refresh(hotspot)
+    return hotspot
 
 
 async def create_keyword(session: AsyncSession, value: str) -> Keyword:

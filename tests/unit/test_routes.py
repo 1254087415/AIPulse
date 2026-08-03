@@ -18,6 +18,7 @@ from aipulse.web.routes import (
     list_hotspots_route,
     list_keywords_route,
     list_sources_route,
+    update_hotspot_route,
     update_keyword_route,
     update_source_route,
 )
@@ -31,9 +32,19 @@ def _make_hotspot_mock(hotspot_id: str, title: str) -> MagicMock:
         url="https://example.com",
         summary=None,
         source_type="rss",
+        content_id="BV1mock",
+        up_name="Mock UP",
+        followed_up_id=None,
         heat_score=1.0,
         importance="medium",
         category=None,
+        status="pending",
+        decision_status="pending",
+        notified=False,
+        obsidian_source_path=None,
+        obsidian_summary_path=None,
+        learning_event_id=None,
+        created_at=datetime.now(UTC),
         published_at=datetime.now(UTC),
     )
 
@@ -86,7 +97,18 @@ async def test_list_hotspots_route_returns_envelope() -> None:
     with patch("aipulse.web.routes.list_hotspots_service", return_value=(hotspots, 1)) as mock:
         result = await list_hotspots_route(session, q="ai")
 
-    mock.assert_awaited_once_with(session, q="ai", source="", importance="", category="", sort="", order="", page=1, limit=20)
+    mock.assert_awaited_once_with(
+        session,
+        q="ai",
+        source="",
+        importance="",
+        category="",
+        decision_status="",
+        sort="",
+        order="",
+        page=1,
+        limit=20,
+    )
     assert result["success"] is True
     assert len(result["data"]) == 1
     assert result["data"][0].id == "h1"
@@ -123,6 +145,22 @@ async def test_get_related_hotspots_route_returns_items() -> None:
     mock.assert_awaited_once_with(session, "h1", limit=10)
     assert result["success"] is True
     assert result["data"][0].id == "h2"
+
+
+@pytest.mark.unit
+async def test_update_hotspot_route_updates_decision_status() -> None:
+    session = AsyncMock()
+    hotspot = _make_hotspot_mock("h1", "T1")
+    hotspot.decision_status = "skipped"
+    payload = MagicMock(model_dump=lambda exclude_unset: {"decision_status": "skipped"})
+    session.get.return_value = hotspot
+
+    with patch("aipulse.web.routes.update_hotspot_service", return_value=hotspot) as mock:
+        result = await update_hotspot_route("h1", payload, session)
+
+    mock.assert_awaited_once_with(session, "h1", {"decision_status": "skipped"})
+    assert result["success"] is True
+    assert result["data"].decision_status == "skipped"
 
 
 @pytest.mark.unit

@@ -118,13 +118,13 @@ async def test_create_reminder_short_title(monkeypatch) -> None:
 # pick_list_for_topic (spec 06 §7.2)
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
-def test_pick_list_for_topic_work_study() -> None:
-    """关键字匹配 → 工作学习 列表。"""
-    assert pick_list_for_topic("LangChain ReAct 学习") == "工作学习"
-    assert pick_list_for_topic("AI 工具实战") == "工作学习"
-    assert pick_list_for_topic("编程之道") == "工作学习"
-    assert pick_list_for_topic("面试经验分享") == "工作学习"
-    assert pick_list_for_topic("前沿技术解读") == "工作学习"
+def test_pick_list_for_topic_learning() -> None:
+    """学习类总结必须落到用户实际的「学习」列表。"""
+    assert pick_list_for_topic("LangChain ReAct 学习") == "学习"
+    assert pick_list_for_topic("AI 工具实战") == "学习"
+    assert pick_list_for_topic("编程之道") == "学习"
+    assert pick_list_for_topic("面试经验分享") == "学习"
+    assert pick_list_for_topic("前沿技术解读") == "学习"
 
 
 @pytest.mark.unit
@@ -134,6 +134,13 @@ def test_pick_list_for_topic_money() -> None:
     assert pick_list_for_topic("副业启动") == "搞钱！！！"
     assert pick_list_for_topic("创业日记") == "搞钱！！！"
     assert pick_list_for_topic("变现案例分析") == "搞钱！！！"
+
+
+@pytest.mark.unit
+def test_pick_list_for_topic_work() -> None:
+    """工作类总结进入独立的「工作」列表，不得回到旧的合并列表。"""
+    assert pick_list_for_topic("工作项目复盘") == "工作"
+    assert pick_list_for_topic("职场沟通技巧") == "工作"
 
 
 @pytest.mark.unit

@@ -722,6 +722,7 @@ async def send_notification(
     note_path: str,
     scheduled_at: str,
     topic: str,
+    reminder_list: str | None = None,
 ) -> dict[str, Any]:
     """追加 Obsidian Task checkbox + Apple Reminders。
 
@@ -750,18 +751,12 @@ async def send_notification(
 
     # Apple Reminders — failure tolerated
     try:
-        from aipulse.apple.reminders import create_reminder  # type: ignore[import-not-found]
+        from aipulse.apple.reminders import (
+            create_reminder,
+            pick_list_for_topic,
+        )
 
-        # tests 走 AIPulse测试 list (feedback_tests-must-isolate-apple-reminders
-        # 硬约束)；生产可由 settings.apple_reminders_list 覆盖。
-        list_name = "AIPulse测试"
-        try:
-            from aipulse.core.config import get_settings as _gs
-
-            cfg = _gs()
-            list_name = getattr(cfg, "apple_reminders_list", list_name) or list_name
-        except Exception:  # noqa: BLE001
-            pass
+        list_name = reminder_list or pick_list_for_topic(topic)
         reminder_id: Optional[str] = await create_reminder(
             title=topic,
             due_date=scheduled_at,

@@ -1,13 +1,25 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import SummarizeButton from '../../components/buttons/SummarizeButton.vue'
+import AppButton from '../../components/ui/AppButton.vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
 import { listSummaryJobs, type SummaryJob } from '../../api/summaryJobs'
 import { subscribeSse } from '../../lib/sse-client'
+import { summarizeError, type ErrorSummary } from '../../lib/errorMessage'
 
 const jobs = ref<SummaryJob[]>([])
 const loading = ref(false)
 const errorMessage = ref('')
 let cleanup: (() => void) | null = null
+
+function jobErrorView(raw: string | null | undefined): ErrorSummary {
+  return summarizeError(raw ?? '处理未完成，请重试')
+}
+
+function jobErrorTitle(raw: string | null | undefined): string {
+  const view = summarizeError(raw ?? '处理未完成，请重试')
+  return view.technical ?? view.summary
+}
 
 async function loadFailedJobs(): Promise<void> {
   loading.value = true
@@ -35,19 +47,33 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => cleanup?.())
+
+const fallbackErrorView = computed(() => summarizeError(errorMessage.value))
 </script>
 
 <template>
   <section class="follow-panel" data-testid="panel-follow-failed" aria-labelledby="failed-title">
-    <header class="panel-header">
-      <div>
-        <p class="eyebrow">ACTION REQUIRED</p>
-        <h2 id="failed-title">失败</h2>
-      </div>
-      <button type="button" class="refresh-button" :disabled="loading" @click="loadFailedJobs">刷新</button>
-    </header>
+    <PageHeader heading-id="failed-title" title="失败" subtitle="需要重试或人工处理的任务">
+      <template #actions>
+        <AppButton
+          size="sm"
+          variant="secondary"
+          :loading="loading"
+          data-testid="refresh-failed"
+          @click="loadFailedJobs"
+        >
+          刷新
+        </AppButton>
+      </template>
+    </PageHeader>
     <p v-if="loading" class="state-line">正在加载失败记录…</p>
-    <p v-else-if="errorMessage" class="state-line state-error">暂时无法读取失败记录。</p>
+    <p
+      v-else-if="errorMessage"
+      class="state-line state-error"
+      :title="fallbackErrorView.technical ?? fallbackErrorView.summary"
+    >
+      {{ fallbackErrorView.summary }}
+    </p>
     <p v-else-if="jobs.length === 0" class="empty-state" data-testid="empty-state">
       太好了，目前没有失败任务。
     </p>
@@ -56,7 +82,11 @@ onBeforeUnmount(() => cleanup?.())
         <div class="item-copy">
           <strong>{{ job.title || job.video_id }}</strong>
           <span>{{ job.video_id }} · {{ job.up_name || '未知 UP 主' }}</span>
-          <span class="error-text">{{ job.error || '处理未完成，请重试' }}</span>
+          <span
+            class="error-text"
+            :data-testid="`failed-error-${job.id}`"
+            :title="jobErrorTitle(job.error)"
+          >{{ jobErrorView(job.error).summary }}</span>
         </div>
         <SummarizeButton :bvid="job.video_id" />
       </article>
@@ -66,11 +96,6 @@ onBeforeUnmount(() => cleanup?.())
 
 <style scoped>
 .follow-panel { padding: 24px; }
-.panel-header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 20px; }
-.eyebrow { margin: 0 0 4px; color: var(--text-secondary); font-size: 11px; letter-spacing: .12em; }
-h2 { margin: 0; font-size: var(--text-xl); }
-.refresh-button { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-elevated); padding: 7px 12px; cursor: pointer; }
-.refresh-button:disabled { opacity: .6; cursor: default; }
 .state-line, .empty-state { padding: 24px; color: var(--text-secondary); background: var(--surface-elevated); border: 1px dashed var(--border-subtle); border-radius: var(--radius-md); }
 .state-error, .error-text { color: var(--status-red); }
 .item-list { display: grid; gap: 8px; }

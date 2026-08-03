@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from aipulse.core.article_pipeline import ArticlePipeline
 from aipulse.core.config import AppSettings, get_settings, reset_settings
 from aipulse.core.content_router import ContentType
+from aipulse.core.datetime_utils import format_iso_utc
 from aipulse.core.pipeline import PipelineContext, PipelineEvent, PipelineObserver
 from aipulse.core.rpc import JsonRpcApplicationError, JsonRpcRequest, JsonRpcResponse
 from aipulse.core.video_pipeline import VideoPipeline
@@ -190,7 +191,7 @@ class Sidecar:
                     "status": task.status,
                     "title": task.title,
                     "error_message": task.error_message,
-                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "created_at": format_iso_utc(task.created_at),
                 }
                 for task in tasks
             ]
@@ -324,11 +325,18 @@ class Sidecar:
 
         payload = {"jsonrpc": "2.0", "method": method, "params": params}
         line = json.dumps(payload, ensure_ascii=False) + "\n"
-        if self._write_line is not None:
-            self._write_line(line)
-        else:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+        try:
+            if self._write_line is not None:
+                self._write_line(line)
+            else:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+        except (OSError, ValueError):
+            # Best-effort sink: the extension disconnects the native-messaging
+            # port as soon as submit_url returns, so stdout is a broken pipe
+            # while the pipeline is still running. A dead notification channel
+            # must not fail the task itself.
+            pass
 
     async def emit_progress(
         self,

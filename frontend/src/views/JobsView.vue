@@ -5,8 +5,18 @@
  * 数据来源：GET /api/scheduler/jobs
  * 真实返回字段：id / name / func / trigger / next_run_time
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime, formatJobName } from '../lib/format'
+import {
+  summarizeFuncPath,
+  summarizeTrigger,
+  summarizeError,
+  type TechnicalSummary,
+} from '../lib/errorMessage'
 
 interface ScheduledJob {
   id: string
@@ -16,9 +26,23 @@ interface ScheduledJob {
   next_run_time: string | null
 }
 
-const jobs = ref<ScheduledJob[]>([])
+interface JobView {
+  job: ScheduledJob
+  triggerLabel: string
+  func: TechnicalSummary
+}
+
+const jobs = ref<JobView[]>([])
 const loading = ref(false)
 const errorMessage = ref('')
+
+function viewJob(job: ScheduledJob): JobView {
+  return {
+    job,
+    triggerLabel: summarizeTrigger(job.trigger),
+    func: summarizeFuncPath(job.func),
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -27,47 +51,54 @@ async function load(): Promise<void> {
     const response = await apiFetch<{ success: boolean; data: ScheduledJob[] }>(
       '/api/scheduler/jobs',
     )
-    jobs.value = response.data
+    jobs.value = response.data.map(viewJob)
   } catch (error: unknown) {
+    jobs.value = []
     errorMessage.value = error instanceof Error ? error.message : String(error)
   } finally {
     loading.value = false
   }
 }
 
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
+const fallbackError = computed(() => summarizeError(errorMessage.value))
 
 onMounted(load)
 </script>
 
 <template>
   <section class="jobs-view" data-testid="jobs-view">
-    <header class="view-header">
-      <h2 class="view-title">定时任务</h2>
-      <p class="view-banner">当前为 Phase 1 最小视图（真实调度任务列表）</p>
-    </header>
+    <PageHeader title="定时任务" subtitle="调度器注册的任务与下次运行时间" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
-    <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
-      加载失败：{{ errorMessage }}
+    <p
+      v-else-if="errorMessage"
+      class="state-line state-error"
+      data-testid="error"
+      :title="fallbackError.technical ?? fallbackError.summary"
+    >
+      {{ fallbackError.summary }}
     </p>
-    <p v-else-if="jobs.length === 0" class="state-line" data-testid="empty">
-      暂无任务
-    </p>
+    <EmptyState
+      v-else-if="jobs.length === 0"
+      title="暂无定时任务"
+      description="调度器注册任务后，运行计划会显示在这里。"
+    />
 
     <ul v-else class="job-list" data-testid="job-list">
-      <li v-for="job in jobs" :key="job.id" class="job-row" data-testid="job-row">
+      <li v-for="view in jobs" :key="view.job.id" class="job-row" data-testid="job-row">
         <div class="job-row__head">
-          <span class="job-row__name">{{ job.name }}</span>
-          <span class="job-row__trigger">{{ job.trigger }}</span>
+          <span class="job-row__name" :title="view.func.technical">
+            {{ formatJobName(view.job.name) }}
+          </span>
+          <StatusBadge
+            tone="neutral"
+            :label="view.triggerLabel"
+            :data-testid="`job-trigger-${view.job.id}`"
+            :title="view.job.trigger"
+          />
         </div>
-        <code class="job-row__func">{{ job.func }}</code>
         <div class="job-row__meta">
-          <span class="job-row__time">下次运行：{{ formatTime(job.next_run_time) }}</span>
+          <span class="job-row__time">下次运行：{{ formatDateTime(view.job.next_run_time) }}</span>
         </div>
       </li>
     </ul>
@@ -84,16 +115,6 @@ onMounted(load)
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0 0 16px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;
@@ -119,31 +140,23 @@ onMounted(load)
   background: var(--surface-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  min-width: 0;
 }
 .job-row__head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 .job-row__name {
   font-weight: 500;
   color: var(--text-primary);
-}
-.job-row__trigger {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-bg);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-  font-family: var(--font-mono);
-}
-.job-row__func {
-  font-size: 12px;
-  color: var(--text-secondary);
-  word-break: break-all;
-  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  cursor: help;
 }
 .job-row__meta {
   margin-top: 4px;

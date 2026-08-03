@@ -2,7 +2,7 @@
  * Sidebar design tokens (spec §6.8).
  *
  * Bound to `:root` so any descendant component can reference the same vars.
- * `--signal-rgb` / `--ink-rgb` are RGB triples so `rgba(var(--signal-rgb),
+ * `--signal-rgb` / `--ink-rgb` are RGB triples so `rgb(var(--signal-rgb) /
  * 0.06)` resolves at the active background layer (spec 09 §8.4 L1489-1493).
  */
 :root {
@@ -24,8 +24,8 @@
   /* RGB triples for the active/hover overlays (spec §6.8 + 09 §8.4). */
   --signal-rgb: 249 115 22;   /* matches --accent-coral #f97316 */
   --ink-rgb: 26 26 26;        /* matches --text-primary #1a1a1a */
-  --sidebar-active-bg: rgba(var(--signal-rgb), 0.06);
-  --sidebar-hover-bg: rgba(var(--ink-rgb), 0.04);
+  --sidebar-active-bg: rgb(var(--signal-rgb) / 0.06);
+  --sidebar-hover-bg: rgb(var(--ink-rgb) / 0.04);
 
   /* Inactive items must NOT transition — only the :hover variant does. */
   --sidebar-transition: 150ms ease-out;

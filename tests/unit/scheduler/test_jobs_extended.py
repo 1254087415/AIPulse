@@ -484,7 +484,9 @@ class TestUpsertHotspotFromVideo:
 
         v = _make_upvideo("BV_NEW")
         result = await upsert_hotspot_from_video(fu, v)
-        assert result == 1
+        # v0.3 round 6: 返回 Hotspot | None（不再返回 0/1 int）
+        assert result is not None
+        assert result.content_id == "BV_NEW"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -503,24 +505,29 @@ class TestUpsertHotspotFromVideo:
 
         v = _make_upvideo("BV_DUP")
         # 先插入一次
-        await upsert_hotspot_from_video(fu, v)
-        # 再插入相同 bvid → 返回 0
-        result = await upsert_hotspot_from_video(fu, v)
-        assert result == 0
+        first = await upsert_hotspot_from_video(fu, v)
+        assert first is not None
+        # 再插入相同 bvid → 返回 None
+        second = await upsert_hotspot_from_video(fu, v)
+        assert second is None
 
 
 class TestScanFollowedUpById:
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_returns_zero_when_missing(self, db_session):
+    async def test_raises_when_missing(self, db_session):
+        """L1 #3：未知 id 必须 raise，不能静默返空 ScanOutcome。"""
+        from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
         from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
 
-        result = await scan_followed_up_by_id("does-not-exist")
-        assert result == 0
+        with pytest.raises(FollowedUpNotFoundError):
+            await scan_followed_up_by_id("does-not-exist")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_returns_zero_when_soft_deleted(self, db_session):
+    async def test_raises_when_soft_deleted(self, db_session):
+        """L1 #3：已软删的 id 也必须 raise，不能静默返空 ScanOutcome。"""
+        from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
         from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
 
         fu = FollowedUp(
@@ -534,8 +541,8 @@ class TestScanFollowedUpById:
         await db_session.commit()
         await db_session.refresh(fu)
 
-        result = await scan_followed_up_by_id(fu.id)
-        assert result == 0
+        with pytest.raises(FollowedUpNotFoundError):
+            await scan_followed_up_by_id(fu.id)
 
 
 class TestScanAllFollowedUp:
@@ -645,7 +652,8 @@ class TestScanAllFollowedUp:
             fake_factory,
         ):
             result = await scan_followed_up_by_id(fu.id)
-            assert result == 2
+            # v0.3 round 6: ScanOutcome — new_hotspots 是新插入数
+            assert result.new_hotspots == 2
 
         # last_cursor_id 应该被设置成第一个 bvid
         from aipulse.store.database import get_session_maker

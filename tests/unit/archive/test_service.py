@@ -61,7 +61,7 @@ async def test_append_obsidian_task_writes_markdown_line(
         title="LangChain ReAct",
         due_date="2026-08-01T10:00:00+00:00",
         notes=f"AIPulse 学习提醒\n笔记：{note}",
-        list_name="AIPulse测试",
+        list_name="学习",
     )
     assert ok is True
     content = note.read_text(encoding="utf-8")

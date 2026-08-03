@@ -7,7 +7,10 @@
  * console stays clean.
  */
 import { onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime } from '../lib/format'
 
 interface Digest {
   id: string
@@ -33,35 +36,34 @@ async function load(): Promise<void> {
   }
 }
 
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 onMounted(load)
 </script>
 
 <template>
   <section class="digests-view" data-testid="digests-view">
-    <header class="view-header">
-      <h2 class="view-title">摘要</h2>
-      <p class="view-banner">该视图将在 Phase 4 完整实现（当前仅展示真实列表）</p>
-    </header>
+    <PageHeader title="摘要" subtitle="已生成的视频摘要" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
       加载失败：{{ errorMessage }}
     </p>
-    <p v-else-if="digests.length === 0" class="state-line" data-testid="empty">
-      暂无摘要
-    </p>
+    <EmptyState
+      v-else-if="digests.length === 0"
+      title="暂无摘要"
+      description="完成内容处理后，生成的摘要会显示在这里。"
+    />
 
     <ul v-else class="digest-list" data-testid="digest-list">
       <li v-for="d in digests" :key="d.id" class="digest-row">
         <h3 class="digest-row__title">{{ d.title || d.id }}</h3>
         <p v-if="d.summary" class="digest-row__summary">{{ d.summary }}</p>
-        <span class="digest-row__time">{{ formatTime(d.created_at) }}</span>
+        <EmptyState
+          v-else
+          compact
+          title="暂无摘要内容"
+          description="该条摘要尚未生成。"
+        />
+        <span class="digest-row__time">{{ formatDateTime(d.created_at) }}</span>
       </li>
     </ul>
   </section>
@@ -77,16 +79,6 @@ onMounted(load)
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0 0 16px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;

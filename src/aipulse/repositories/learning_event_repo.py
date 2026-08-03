@@ -85,7 +85,7 @@ class LearningEventRepository(Protocol):
         estimated_minutes: int = 15,
         summary_note_path: Optional[str] = None,
         platform: str = "bilibili",
-        apple_reminders_list: str = "工作学习",
+        apple_reminders_list: str = "学习",
     ) -> LearningEventRecord: ...
 
     async def mark_completed(self, event_id: str) -> LearningEventRecord: ...
@@ -140,7 +140,7 @@ class SqlAlchemyLearningEventRepository:
         estimated_minutes: int = 15,
         summary_note_path: Optional[str] = None,
         platform: str = "bilibili",
-        apple_reminders_list: str = "工作学习",
+        apple_reminders_list: str = "学习",
     ) -> LearningEventRecord:
         row = LearningEvent(
             id=make_uuid(),

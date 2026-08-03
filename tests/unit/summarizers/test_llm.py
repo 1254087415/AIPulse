@@ -146,3 +146,46 @@ async def test_complete_raises_on_none_content(
 
     with pytest.raises(RuntimeError, match="empty response"):
         await adapter.complete("prompt")
+
+
+def _mock_response(mock_client: AsyncOpenAI, content: str) -> None:
+    message = MagicMock()
+    message.content = content
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    mock_client.chat.completions.create = AsyncMock(return_value=response)
+
+
+@pytest.mark.unit
+async def test_complete_strips_think_block(settings: AppSettings, mock_client: AsyncOpenAI) -> None:
+    adapter = OpenAICompatibleAdapter(settings, client=mock_client)
+    _mock_response(mock_client, "<think>\n让我分析一下……\n逐步推理\n</think>\n真正的总结")
+
+    result = await adapter.complete("prompt")
+
+    assert result == "真正的总结"
+
+
+@pytest.mark.unit
+async def test_complete_strips_unclosed_think_block(
+    settings: AppSettings, mock_client: AsyncOpenAI
+) -> None:
+    adapter = OpenAICompatibleAdapter(settings, client=mock_client)
+    _mock_response(mock_client, "正常开头\n<think> truncated reasoning")
+
+    result = await adapter.complete("prompt")
+
+    assert result == "正常开头"
+
+
+@pytest.mark.unit
+async def test_complete_raises_when_only_think_block(
+    settings: AppSettings, mock_client: AsyncOpenAI
+) -> None:
+    adapter = OpenAICompatibleAdapter(settings, client=mock_client)
+    _mock_response(mock_client, "<think>只有推理没有答案</think>")
+
+    with pytest.raises(RuntimeError, match="empty response"):
+        await adapter.complete("prompt")

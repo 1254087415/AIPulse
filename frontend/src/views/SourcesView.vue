@@ -7,8 +7,18 @@
  * source-editor UI lands later; this minimal version exists so the route
  * resolves, the panel renders real data, and console stays clean.
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime, formatInterval } from '../lib/format'
+import {
+  summarizeClassPath,
+  summarizeError,
+  type ErrorSummary,
+  type TechnicalSummary,
+} from '../lib/errorMessage'
 
 interface Source {
   id: string
@@ -22,66 +32,92 @@ interface Source {
   last_error: string | null
 }
 
-const sources = ref<Source[]>([])
+interface SourceView {
+  source: Source
+  collector: TechnicalSummary
+  error: ErrorSummary
+}
+
+const sources = ref<SourceView[]>([])
 const loading = ref(false)
 const errorMessage = ref('')
+
+function viewSource(src: Source): SourceView {
+  return {
+    source: src,
+    collector: summarizeClassPath(src.collector_class),
+    error: summarizeError(src.last_error),
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
     const response = await apiFetch<{ success: boolean; data: Source[] }>('/api/sources')
-    sources.value = response.data
+    sources.value = response.data.map(viewSource)
   } catch (error: unknown) {
+    sources.value = []
     errorMessage.value = error instanceof Error ? error.message : String(error)
   } finally {
     loading.value = false
   }
 }
 
-function formatTime(iso: string | null): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
+const fallbackError = computed(() => summarizeError(errorMessage.value))
 
 onMounted(load)
 </script>
 
 <template>
   <section class="sources-view" data-testid="sources-view">
-    <header class="view-header">
-      <h2 class="view-title">来源</h2>
-      <p class="view-banner">该视图将在 Phase 7 完整实现（当前仅展示真实列表）</p>
-    </header>
+    <PageHeader title="来源" subtitle="已配置的内容来源与采集器状态" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
-    <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
-      加载失败：{{ errorMessage }}
+    <p
+      v-else-if="errorMessage"
+      class="state-line state-error"
+      data-testid="error"
+      :title="fallbackError.technical ?? fallbackError.summary"
+    >
+      {{ fallbackError.summary }}
     </p>
-    <p v-else-if="sources.length === 0" class="state-line" data-testid="empty">
-      暂无来源
-    </p>
+    <EmptyState
+      v-else-if="sources.length === 0"
+      title="暂无来源"
+      description="配置内容来源后，采集状态会显示在这里。"
+    />
 
     <ul v-else class="source-list" data-testid="source-list">
-      <li v-for="src in sources" :key="src.id" class="source-card">
+      <li v-for="view in sources" :key="view.source.id" class="source-card" data-testid="source-card">
         <div class="source-card__row">
-          <span class="source-card__name">{{ src.name }}</span>
-          <span
-            class="source-card__badge"
-            :class="{ 'source-card__badge--off': !src.is_active }"
-          >
-            {{ src.is_active ? '启用' : '停用' }}
-          </span>
+          <span class="source-card__name">{{ view.source.name }}</span>
+          <StatusBadge
+            :tone="view.source.is_active ? 'success' : 'neutral'"
+            :label="view.source.is_active ? '启用' : '停用'"
+          />
         </div>
         <dl class="source-card__meta">
-          <dt>类型</dt><dd>{{ src.source_type }}</dd>
-          <dt>采集器</dt><dd><code>{{ src.collector_class }}</code></dd>
-          <dt>权重</dt><dd>{{ src.default_weight }}</dd>
-          <dt>间隔</dt><dd>{{ src.fetch_interval_minutes }} 分钟</dd>
-          <dt>最近拉取</dt><dd>{{ formatTime(src.last_fetched_at) }}</dd>
-          <dt v-if="src.last_error">错误</dt>
-          <dd v-if="src.last_error" class="state-error">{{ src.last_error }}</dd>
+          <dt>类型</dt><dd>{{ view.source.source_type }}</dd>
+          <dt>采集器</dt>
+          <dd>
+            <span
+              class="source-card__collector"
+              :data-testid="`source-collector-${view.source.id}`"
+              :title="view.collector.technical"
+            >{{ view.collector.display }}</span>
+          </dd>
+          <dt>权重</dt><dd>{{ view.source.default_weight }}</dd>
+          <dt>间隔</dt><dd>{{ formatInterval(view.source.fetch_interval_minutes) }}</dd>
+          <dt>最近拉取</dt><dd>{{ formatDateTime(view.source.last_fetched_at) }}</dd>
+          <template v-if="view.source.last_error">
+            <dt>错误</dt>
+            <dd
+              class="state-error source-card__error"
+              :data-testid="`source-error-${view.source.id}`"
+              :title="view.error.technical ?? view.error.summary"
+            >{{ view.error.summary }}</dd>
+          </template>
         </dl>
       </li>
     </ul>
@@ -94,23 +130,10 @@ onMounted(load)
   height: 100%;
   overflow-y: auto;
 }
-.view-header {
-  margin-bottom: 16px;
-}
 .view-title {
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;
@@ -133,30 +156,26 @@ onMounted(load)
   background: var(--surface-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+  min-width: 0;
+  overflow: hidden;
 }
 .source-card__row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  gap: 8px;
 }
 .source-card__name {
   font-weight: 600;
-}
-.source-card__badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--status-green) 20%, transparent);
-  color: var(--status-green);
-}
-.source-card__badge--off {
-  background: color-mix(in srgb, var(--status-red) 20%, transparent);
-  color: var(--status-red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .source-card__meta {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 12px;
   margin: 0;
   font-size: 12px;
@@ -167,5 +186,20 @@ onMounted(load)
 .source-card__meta dd {
   margin: 0;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.source-card__collector {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.source-card__error {
+  background: color-mix(in srgb, var(--status-red) 12%, transparent);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
 }
 </style>

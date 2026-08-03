@@ -1,9 +1,17 @@
 """Pydantic schemas for hotspot API responses and requests."""
 
-from datetime import date as _date, datetime
+from datetime import date as _date
+from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer
+
+from aipulse.core.datetime_utils import format_iso_utc
+
+DecisionStatusStr = Annotated[
+    str,
+    Field(pattern=r"^(pending|worth_learning|worth_notified|skipped|failed|archived)$"),
+]
 
 
 class HotspotOut(BaseModel):
@@ -16,10 +24,25 @@ class HotspotOut(BaseModel):
     url: str
     summary: str | None
     source_type: str
+    content_id: str | None = None
+    up_name: str | None = None
     heat_score: float
     importance: str
     category: str | None
+    status: str
+    decision_status: str
+    notified: bool
+    obsidian_source_path: str | None = None
+    obsidian_summary_path: str | None = None
+    learning_event_id: str | None = None
+    created_at: datetime
     published_at: datetime | None
+
+
+class HotspotUpdate(BaseModel):
+    """Partial update schema for a hotspot decision."""
+
+    decision_status: DecisionStatusStr | None = None
 
 
 class HotspotListResponse(BaseModel):
@@ -91,6 +114,16 @@ class DailyDigestOut(BaseModel):
     top_hotspot_ids: list[Any] | None
     generated_at: datetime
     pushed_at: datetime | None
+
+    @field_serializer("generated_at", "pushed_at", check_fields=False)
+    def _serialize_datetime(self, value: datetime | None) -> str | None:
+        """v0.3 时区修复：DATETIME 字段序列化必带 +00:00 偏移。
+
+        SQLite DATETIME 读回丢 tzinfo，让 Pydantic 默认 isoformat()
+        输出无偏移串 → 前端 format.ts fallback +08:00 误读 → 慢 8 小时。
+        走 ``format_iso_utc`` 统一归一为 UTC aware 后再序列化。
+        """
+        return format_iso_utc(value)
 
 
 class GenerateDigestRequest(BaseModel):

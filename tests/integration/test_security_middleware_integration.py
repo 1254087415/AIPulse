@@ -30,6 +30,15 @@ async def test_unauthenticated_when_token_unset(client):
 
 
 @pytest.mark.integration
+async def test_sources_reject_missing_bearer_when_token_configured(client, monkeypatch):
+    """The sources page reproduces the current 401 when the UI sends no token."""
+    _patch_token(monkeypatch, "secret123")
+    response = await client.get("/api/sources")
+    assert response.status_code == 401
+    assert response.json() == {"success": False, "error": "Unauthorized"}
+
+
+@pytest.mark.integration
 async def test_bearer_token_required_when_configured(client, monkeypatch):
     """With a token configured, missing Authorization header returns 401."""
     _patch_token(monkeypatch, "secret123")

@@ -13,10 +13,15 @@
  * the list and the surrounding chrome.
  */
 import { computed, ref, onMounted } from 'vue'
+import { router } from '../../router'
 import AddFollowForm from './AddFollowForm.vue'
 import FollowCard from './FollowCard.vue'
 import HealthBadge from '../health-badge/HealthBadge.vue'
+import AppButton from '../ui/AppButton.vue'
+import ConfirmModal from '../ui/ConfirmModal.vue'
+import PageHeader from '../ui/PageHeader.vue'
 import { listFollowed, createFollowed, type FollowedUp, type FollowedUpCreate } from '../../api/followedUp'
+import { followApi } from '../../api/follow'
 
 interface PanelError {
   message: string
@@ -32,6 +37,9 @@ const loadError = ref<string>('')
 const showAddForm = ref<boolean>(false)
 const submitting = ref<boolean>(false)
 const createError = ref<PanelError | null>(null)
+const actionError = ref<string>('')
+const deleteTarget = ref<FollowedUp | null>(null)
+const mutatingId = ref<string | null>(null)
 
 const sortedItems = computed<FollowedUp[]>(() => {
   return [...items.value].sort((a, b) => {
@@ -42,6 +50,14 @@ const sortedItems = computed<FollowedUp[]>(() => {
 })
 
 const isOverLimit = computed<boolean>(() => sortedItems.value.length > MAX_FOLLOW_LIMIT)
+
+const listSubtitle = computed<string>(() => {
+  const parts: string[] = [`${sortedItems.value.length} 个 UP 主`]
+  if (sortedItems.value.length > 0) {
+    parts.push(isOverLimit.value ? '关注节奏可能影响扫描频率' : '全部启用')
+  }
+  return parts.join(' · ')
+})
 
 const fetchList = async (): Promise<void> => {
   isLoading.value = true
@@ -60,11 +76,13 @@ const fetchList = async (): Promise<void> => {
 const openAddForm = (): void => {
   showAddForm.value = true
   createError.value = null
+  actionError.value = ''
 }
 
 const cancelAddForm = (): void => {
   showAddForm.value = false
   createError.value = null
+  actionError.value = ''
 }
 
 const submitAddForm = async (payload: FollowedUpCreate): Promise<void> => {
@@ -73,6 +91,7 @@ const submitAddForm = async (payload: FollowedUpCreate): Promise<void> => {
   try {
     await createFollowed(payload)
     showAddForm.value = false
+    actionError.value = ''
     await fetchList()
   } catch (error: unknown) {
     createError.value = {
@@ -84,20 +103,66 @@ const submitAddForm = async (payload: FollowedUpCreate): Promise<void> => {
   }
 }
 
-const onRemove = async (id: string): Promise<void> => {
-  items.value = items.value.filter((item) => item.id !== id)
+const onRemove = (id: string): void => {
+  actionError.value = ''
+  deleteTarget.value = items.value.find((item) => item.id === id) ?? null
 }
 
-const onSync = async (_id: string): Promise<void> => {
-  // Sync is delegated to a parent-driven mutation in later phases; for now
-  // surface a lightweight feedback through loadError so the user sees action.
-  await fetchList()
+const onConfirmRemove = async (): Promise<void> => {
+  const target = deleteTarget.value
+  if (!target || mutatingId.value) return
+  mutatingId.value = target.id
+  try {
+    await followApi.remove(target.id)
+    actionError.value = ''
+    deleteTarget.value = null
+    await fetchList()
+  } catch (error: unknown) {
+    actionError.value = extractMessage(error, '删除失败')
+  } finally {
+    mutatingId.value = null
+  }
 }
 
 const onEdit = (id: string): void => {
-  // Phase 2+ — wire to the detail view. For Phase 1 we simply surface a hint.
-  loadError.value = `编辑 ${id} 将在 Phase 2 启用`
+  const item = items.value.find((candidate) => candidate.id === id)
+  if (item) void router.push(`/followed-up/${encodeURIComponent(item.uid)}`)
 }
+
+const onSync = async (id: string): Promise<void> => {
+  if (mutatingId.value) return
+  mutatingId.value = id
+  try {
+    await followApi.scanNow(id)
+    actionError.value = ''
+    await fetchList()
+  } catch (error: unknown) {
+    actionError.value = extractMessage(error, '同步失败')
+  } finally {
+    mutatingId.value = null
+  }
+}
+
+const onToggle = async (id: string, enabled: boolean): Promise<void> => {
+  if (mutatingId.value) return
+  mutatingId.value = id
+  try {
+    await followApi.setEnabled(id, enabled)
+    actionError.value = ''
+    await fetchList()
+  } catch (error: unknown) {
+    actionError.value = extractMessage(error, '更新启用状态失败')
+  } finally {
+    mutatingId.value = null
+  }
+}
+
+const actionErrorMessage = computed<string>(() => (deleteTarget.value ? '' : actionError.value))
+
+const deleteModalErrorMessage = computed<string | null>(() => {
+  if (!deleteTarget.value || !actionError.value) return null
+  return actionError.value
+})
 
 function extractMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message
@@ -126,35 +191,31 @@ onMounted(() => {
 
 <template>
   <section class="follow-list-panel">
-    <header class="follow-list-panel__header">
-      <div>
-        <h2 class="follow-list-panel__title">关注列表</h2>
-        <p class="follow-list-panel__subtitle">
-          <span data-testid="count">{{ sortedItems.length }}</span> 个 UP 主
-          <span v-if="sortedItems.length > 0" class="follow-list-panel__hint">
-            ·
-            <span v-if="isOverLimit" data-testid="over-limit-warning" class="follow-list-panel__warning">
-              超过 {{ MAX_FOLLOW_LIMIT }} 个，关注节奏可能影响扫描频率
-            </span>
-            <span v-else>全部启用</span>
-          </span>
-        </p>
-      </div>
-      <button
-        v-if="!showAddForm"
-        type="button"
-        class="follow-list-panel__btn follow-list-panel__btn--primary"
-        data-testid="open-add-form"
-        @click="openAddForm"
-      >
-        ➕ 添加 UP 主
-      </button>
-    </header>
+    <PageHeader
+      title="关注列表"
+      :subtitle="listSubtitle"
+    >
+      <template v-if="isOverLimit" #subtitle>
+        <span data-testid="count">{{ sortedItems.length }}</span> 个 UP 主 · 关注节奏可能影响扫描频率
+        <span data-testid="over-limit-warning" class="follow-list-panel__warning">
+          （超过 {{ MAX_FOLLOW_LIMIT }} 个）
+        </span>
+      </template>
+      <template v-if="!showAddForm" #actions>
+        <AppButton
+          variant="primary"
+          data-testid="open-add-form"
+          @click="openAddForm"
+        >
+          ➕ 添加 UP 主
+        </AppButton>
+      </template>
+    </PageHeader>
 
     <div v-if="isLoading" class="follow-list-panel__state">加载中…</div>
     <div v-else-if="isError" class="follow-list-panel__state follow-list-panel__state--error">
       {{ loadError }}
-      <button type="button" class="follow-list-panel__btn" @click="fetchList()">重试</button>
+      <AppButton size="sm" @click="fetchList()">重试</AppButton>
     </div>
     <div
       v-else-if="sortedItems.length === 0 && !showAddForm"
@@ -181,6 +242,15 @@ onMounted(() => {
       {{ formatCreateError(createError) }}
     </p>
 
+    <p
+      v-if="actionErrorMessage"
+      class="follow-list-panel__action-error"
+      data-testid="action-error"
+      role="alert"
+    >
+      {{ actionErrorMessage }}
+    </p>
+
     <ul v-if="sortedItems.length > 0" class="follow-list-panel__list">
       <li v-for="item in sortedItems" :key="item.id" class="follow-list-panel__item">
         <FollowCard
@@ -188,13 +258,33 @@ onMounted(() => {
           @remove="onRemove"
           @sync="onSync"
           @edit="onEdit"
+          @toggle="onToggle"
         >
           <template #health>
             <HealthBadge :status="item.health" />
           </template>
+          <template #detail>
+            <router-link class="follow-card__detail-link" :to="`/followed-up/${encodeURIComponent(item.uid)}`">
+              查看详情
+            </router-link>
+          </template>
         </FollowCard>
       </li>
     </ul>
+
+    <ConfirmModal
+      :show="!!deleteTarget"
+      title="删除关注？"
+      :message="`确认删除 ${deleteTarget?.display_name ?? ''}？删除后不会再自动同步。`"
+      :error-message="deleteModalErrorMessage"
+      confirm-text="删除"
+      cancel-text="取消"
+      danger
+      :loading="!!mutatingId"
+      test-id-prefix="follow-delete-confirm"
+      @cancel="deleteTarget = null"
+      @confirm="onConfirmRemove"
+    />
   </section>
 </template>
 
@@ -205,63 +295,6 @@ onMounted(() => {
   gap: 16px;
 }
 
-.follow-list-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.follow-list-panel__title {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.follow-list-panel__subtitle {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.follow-list-panel__hint {
-  margin-left: 4px;
-}
-
-.follow-list-panel__warning {
-  color: var(--status-amber);
-  font-weight: 500;
-}
-
-.follow-list-panel__btn {
-  appearance: none;
-  height: 36px;
-  padding: 0 16px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-}
-
-.follow-list-panel__btn:hover {
-  background: var(--surface-elevated-hover);
-}
-
-.follow-list-panel__btn--primary {
-  background: var(--accent-coral);
-  border-color: var(--accent-coral);
-  color: var(--surface-elevated);
-}
-
-.follow-list-panel__btn--primary:hover {
-  background: color-mix(in srgb, var(--accent-coral) 88%, black);
-}
-
 .follow-list-panel__state {
   padding: 24px;
   background: var(--surface-elevated);
@@ -269,18 +302,32 @@ onMounted(() => {
   border-radius: var(--radius-md);
   text-align: center;
   color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
 }
 
 .follow-list-panel__state--error {
   border-style: solid;
   color: var(--status-red);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: center;
+}
+
+.follow-list-panel__warning {
+  color: var(--status-amber);
+  font-weight: 500;
 }
 
 .follow-list-panel__create-error {
+  margin: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--status-red) 12%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--status-red);
+  font-size: 13px;
+}
+
+.follow-list-panel__action-error {
   margin: 0;
   padding: 8px 12px;
   background: color-mix(in srgb, var(--status-red) 12%, transparent);
@@ -296,5 +343,35 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* The 「查看详情」router-link lives in this template (slot into FollowCard),
+   so the link styles must live here too — FollowCard's <style scoped> would
+   not apply. Loop D unified this with the rest of the link/button family
+   (ghost variant on a small AppButton) — previously browser-default blue. */
+.follow-card__detail-link {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-coral);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent-coral);
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.follow-card__detail-link:hover {
+  background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
+  color: var(--accent-coral);
+}
+
+.follow-card__detail-link:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--surface-elevated),
+    0 0 0 4px var(--accent-coral);
 }
 </style>

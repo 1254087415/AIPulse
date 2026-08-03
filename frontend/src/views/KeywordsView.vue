@@ -7,7 +7,10 @@
  * stays clean.
  */
 import { onMounted, ref } from 'vue'
+import EmptyState from '../components/ui/EmptyState.vue'
+import PageHeader from '../components/ui/PageHeader.vue'
 import { apiFetch } from '../lib/apiFetch'
+import { formatDateTime } from '../lib/format'
 
 interface Keyword {
   id: string
@@ -34,29 +37,22 @@ async function load(): Promise<void> {
   }
 }
 
-function formatTime(iso: string | null): string {
-  if (!iso) return '—'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
 onMounted(load)
 </script>
 
 <template>
   <section class="keywords-view" data-testid="keywords-view">
-    <header class="view-header">
-      <h2 class="view-title">关键词</h2>
-      <p class="view-banner">该视图将在 Phase 7 完整实现（当前仅展示真实列表）</p>
-    </header>
+    <PageHeader title="关键词" subtitle="关注的关键词与权重配置" />
 
     <p v-if="loading" class="state-line" data-testid="loading">加载中…</p>
     <p v-else-if="errorMessage" class="state-line state-error" data-testid="error">
       加载失败：{{ errorMessage }}
     </p>
-    <p v-else-if="keywords.length === 0" class="state-line" data-testid="empty">
-      暂无关键词
-    </p>
+    <EmptyState
+      v-else-if="keywords.length === 0"
+      title="暂无关键词"
+      description="添加关键词后，AIPulse 会按关注方向筛选内容。"
+    />
 
     <ul v-else class="keyword-list" data-testid="keyword-list">
       <li v-for="kw in keywords" :key="kw.id" class="keyword-row">
@@ -68,7 +64,7 @@ onMounted(load)
         >
           {{ kw.is_active ? '启用' : '停用' }}
         </span>
-        <span class="keyword-row__time">{{ formatTime(kw.last_triggered_at) }}</span>
+        <span class="keyword-row__time">{{ formatDateTime(kw.last_triggered_at) }}</span>
       </li>
     </ul>
   </section>
@@ -84,16 +80,6 @@ onMounted(load)
   margin: 0 0 4px;
   font-size: var(--text-xl);
   font-weight: 600;
-}
-.view-banner {
-  margin: 0 0 16px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-elevated);
-  border: 1px dashed var(--border-subtle);
-  border-radius: var(--radius-sm);
-  display: inline-block;
 }
 .state-line {
   margin: 16px 0;

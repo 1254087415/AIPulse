@@ -12,7 +12,30 @@ const ARTICLE_PORT = 3456;
 const BRIDGE_PORT = ARTICLE_PORT; // Extension host_permissions only allow localhost:3456
 const LLM_MOCK_PORT = 3458;
 const PROJECT_ROOT = path.resolve(__dirname, '../../../..');
-const PYTHON = path.resolve(PROJECT_ROOT, '.venv/bin/python');
+
+/**
+ * Resolve the Python interpreter and aipulse package root, same precedence as
+ * helpers/real-backend.ts: prefer `.venv/bin/python` and `src-python/aipulse`
+ * when present, fall back to system `python3` / `python` and `src/aipulse`.
+ */
+function resolvePython(projectRoot: string): string {
+  const venvPython = path.join(projectRoot, '.venv', 'bin', 'python');
+  if (fs.existsSync(venvPython)) return venvPython;
+  return 'python3';
+}
+
+function resolvePackageRoot(projectRoot: string): string {
+  for (const candidate of ['src-python', 'src']) {
+    const abs = path.join(projectRoot, candidate);
+    if (fs.existsSync(path.join(abs, 'aipulse', 'desktop', 'sidecar.py'))) {
+      return abs;
+    }
+  }
+  return path.join(projectRoot, 'src');
+}
+
+const PYTHON = resolvePython(PROJECT_ROOT);
+const PACKAGE_ROOT = resolvePackageRoot(PROJECT_ROOT);
 
 const ARTICLE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -223,16 +246,21 @@ test.describe('Obsidian archive E2E', () => {
     llmServer = await startLlmMockServer();
 
     // 2. Start the real Python sidecar against a temporary vault.
+    // LLM_* env vars (v0.4 renamed from KIMI_*) feed into AppSettings via
+    // pydantic-settings validation_alias; KIMI_* would be silently ignored
+    // and the AsyncOpenAI client would fall back to its built-in default
+    // base URL, which then 401s because no real key is set.
     const sidecarEnv = {
       ...process.env,
       DATA_DIR: dataDir,
       DOWNLOAD_DIR: path.join(dataDir, 'downloads'),
       DATABASE_URL: `sqlite+aiosqlite:///${path.join(dataDir, 'aipulse.db')}`,
       OBSIDIAN_VAULT_PATH: vaultDir,
-      KIMI_BASE_URL: `http://127.0.0.1:${LLM_MOCK_PORT}`,
-      KIMI_API_KEY: 'e2e-dummy-key',
-      KIMI_MODEL: 'e2e-mock',
+      LLM_BASE_URL: `http://127.0.0.1:${LLM_MOCK_PORT}`,
+      LLM_API_KEY: 'e2e-dummy-key',
+      LLM_MODEL: 'e2e-mock',
       AUTO_CREATE_TABLES: 'true',
+      PYTHONPATH: PACKAGE_ROOT,
       all_proxy: '',
       http_proxy: '',
       https_proxy: '',

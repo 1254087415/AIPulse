@@ -8,8 +8,11 @@
  * All mutating actions are emitted up to the parent (the list panel), which
  * owns the API calls and the optimistic update flow.
  */
-import { computed } from 'vue'
-import HealthBadge from '../health-badge/HealthBadge.vue'
+import { computed, ref } from 'vue'
+import StatusBadge from '../ui/StatusBadge.vue'
+import AppButton from '../ui/AppButton.vue'
+import { formatDateTime, formatInterval } from '../../lib/format'
+import { summarizeError } from '../../lib/errorMessage'
 import type { FollowedUp } from '../../api/followedUp'
 
 interface Props {
@@ -22,6 +25,7 @@ const emit = defineEmits<{
   (e: 'remove', id: string): void
   (e: 'sync', id: string): void
   (e: 'edit', id: string): void
+  (e: 'toggle', id: string, enabled: boolean): void
 }>()
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -33,10 +37,15 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 const platformLabel = computed(() => PLATFORM_LABELS[props.followed.platform] ?? props.followed.platform)
 const statusLabel = computed(() => (props.followed.is_active ? '启用' : '已暂停'))
+const healthBadge = computed(() => ({
+  healthy: { label: '健康', tone: 'success' as const },
+  warning: { label: '关注', tone: 'warning' as const },
+  error: { label: '异常', tone: 'danger' as const },
+})[props.followed.health])
 
 const lastCheckedLabel = computed(() => {
   if (!props.followed.last_checked_at) return '尚未扫描'
-  return new Date(props.followed.last_checked_at).toLocaleString('zh-CN')
+  return formatDateTime(props.followed.last_checked_at)
 })
 
 const avatarInitial = computed(() => {
@@ -44,81 +53,122 @@ const avatarInitial = computed(() => {
   return name.slice(0, 1) || '?'
 })
 
+// Avatar URL priority: cached B站 avatar (config.avatar_url, populated by
+// opening the detail page — see backend fix in 68ced3c) → profile_url.
+// profile_url defaults to the user space URL when the user adds the UP, which
+// is not a valid image src; we fall back to the initial letter when image
+// load fails.
+const cachedAvatarUrl = computed<string | null>(() => {
+  const cfg = props.followed.config
+  if (cfg && typeof cfg === 'object' && typeof cfg.avatar_url === 'string') {
+    return cfg.avatar_url
+  }
+  return null
+})
+
+const avatarUrl = computed<string | null>(() => cachedAvatarUrl.value ?? props.followed.profile_url ?? null)
+
+const imageFailed = ref(false)
+const showImage = computed(() => !!avatarUrl.value && !imageFailed.value)
+
+const onAvatarError = (): void => {
+  imageFailed.value = true
+}
+
+const lastErrorSummary = computed(() => summarizeError(props.followed.last_error))
+
 const onRemove = (): void => emit('remove', props.followed.id)
 const onSync = (): void => emit('sync', props.followed.id)
 const onEdit = (): void => emit('edit', props.followed.id)
+const onToggle = (): void => emit('toggle', props.followed.id, !props.followed.is_active)
 </script>
 
 <template>
   <article class="follow-card" :class="{ 'is-paused': !followed.is_active }">
     <div class="follow-card__avatar" aria-hidden="true">
       <img
-        v-if="followed.profile_url"
-        :src="followed.profile_url"
+        v-if="showImage"
+        :src="avatarUrl ?? ''"
         :alt="followed.display_name"
         class="follow-card__avatar-img"
         loading="lazy"
-        @error="($event.target as HTMLImageElement).style.display = 'none'"
+        referrerpolicy="no-referrer"
+        @error="onAvatarError"
       />
-      <span v-else class="follow-card__avatar-initial">{{ avatarInitial }}</span>
+      <span class="follow-card__avatar-initial">{{ avatarInitial }}</span>
     </div>
 
     <div class="follow-card__body">
       <header class="follow-card__header">
-        <h3 class="follow-card__name">{{ followed.display_name || followed.uid }}</h3>
-        <span class="follow-card__uid">uid: {{ followed.uid }}</span>
+        <h3 class="follow-card__name" :title="followed.uid">{{ followed.display_name || followed.uid }}</h3>
       </header>
 
       <div class="follow-card__meta">
-        <span class="follow-card__chip follow-card__chip--platform">{{ platformLabel }}</span>
-        <span class="follow-card__chip follow-card__chip--status">{{ statusLabel }}</span>
+        <StatusBadge tone="warning" :label="platformLabel" />
+        <StatusBadge :tone="followed.is_active ? 'success' : 'neutral'" :label="statusLabel" />
         <slot name="health">
-          <HealthBadge :status="followed.health" compact />
+          <StatusBadge :tone="healthBadge.tone" :label="healthBadge.label" />
         </slot>
       </div>
 
       <p class="follow-card__line">
+        <span class="follow-card__label">mid</span>
+        <code data-testid="mid">{{ followed.mid ?? followed.uid }}</code>
+        <span class="follow-card__sep">·</span>
+        <span class="follow-card__label">视频</span>
+        <span data-testid="video-count">{{ followed.video_count ?? 0 }}</span>
+        <span class="follow-card__sep">·</span>
         <span class="follow-card__label">上次同步</span>
         <time :datetime="followed.last_checked_at ?? ''">{{ lastCheckedLabel }}</time>
         <span class="follow-card__sep">·</span>
-        <span>{{ followed.fetch_interval_minutes }} 分钟 / 次</span>
+        <span>{{ formatInterval(followed.fetch_interval_minutes) }}</span>
       </p>
 
       <p
         v-if="followed.last_error"
         class="follow-card__error"
+        :title="lastErrorSummary.technical ?? followed.last_error"
         data-testid="last-error"
         role="alert"
       >
-        {{ followed.last_error }}
+        {{ lastErrorSummary.summary }}
       </p>
     </div>
 
     <div class="follow-card__actions">
-      <button
-        type="button"
-        class="follow-card__btn"
+      <slot name="detail" />
+      <AppButton
+        size="sm"
+        variant="secondary"
+        data-testid="toggle-enabled-button"
+        @click="onToggle"
+      >
+        {{ followed.is_active ? '停用' : '启用' }}
+      </AppButton>
+      <AppButton
+        size="sm"
+        variant="secondary"
         data-testid="sync-button"
         @click="onSync"
       >
         立即同步
-      </button>
-      <button
-        type="button"
-        class="follow-card__btn"
+      </AppButton>
+      <AppButton
+        size="sm"
+        variant="secondary"
         data-testid="edit-button"
         @click="onEdit"
       >
         编辑
-      </button>
-      <button
-        type="button"
-        class="follow-card__btn follow-card__btn--danger"
+      </AppButton>
+      <AppButton
+        size="sm"
+        variant="danger"
         data-testid="remove-button"
         @click="onRemove"
       >
         删除
-      </button>
+      </AppButton>
     </div>
   </article>
 </template>
@@ -161,12 +211,17 @@ const onEdit = (): void => emit('edit', props.followed.id)
 }
 
 .follow-card__avatar-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  z-index: 1;
 }
 
 .follow-card__avatar-initial {
+  position: relative;
+  z-index: 0;
   font-size: 18px;
 }
 
@@ -193,31 +248,10 @@ const onEdit = (): void => emit('edit', props.followed.id)
   white-space: nowrap;
 }
 
-.follow-card__uid {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
 .follow-card__meta {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.follow-card__chip {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--surface-bg);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.follow-card__chip--platform {
-  background: color-mix(in srgb, var(--accent-coral) 10%, transparent);
-  color: var(--accent-coral);
 }
 
 .follow-card__line {
@@ -254,33 +288,5 @@ const onEdit = (): void => emit('edit', props.followed.id)
   flex-direction: column;
   gap: 6px;
   align-items: stretch;
-}
-
-.follow-card__btn {
-  appearance: none;
-  background: var(--surface-bg);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
-}
-
-.follow-card__btn:hover {
-  background: var(--surface-elevated-hover);
-  border-color: var(--text-secondary);
-}
-
-.follow-card__btn--danger {
-  color: var(--status-red);
-  border-color: color-mix(in srgb, var(--status-red) 25%, transparent);
-}
-
-.follow-card__btn--danger:hover {
-  background: var(--status-red);
-  color: var(--surface-elevated);
-  border-color: var(--status-red);
 }
 </style>

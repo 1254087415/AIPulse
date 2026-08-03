@@ -424,9 +424,29 @@ export function Popup() {
             </label>
             <label className="field">
               <span className="field-label">链接</span>
-              <span className="url-value" title={displayUrl}>
-                {isShortLink(displayUrl) && <span className="short-badge">短链</span>}
-                {displayUrl}
+              <span className="url-row">
+                <span className="url-value" title={displayUrl}>
+                  {isShortLink(displayUrl) && <span className="short-badge">短链</span>}
+                  {displayUrl}
+                </span>
+                <button
+                  type="button"
+                  className="copy-url-btn"
+                  onClick={handleCopyUrl}
+                  disabled={loading || subtitleLoading || shareUrlLoading}
+                  aria-label="复制链接"
+                  title="复制链接"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+                    <path
+                      d="M10.5 3.5v-1a1.5 1.5 0 0 0-1.5-1.5H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 10h1"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
               </span>
             </label>
             <label className="field">
@@ -487,9 +507,6 @@ export function Popup() {
           </div>
 
           <div className="actions">
-            <button type="button" onClick={handleCopyUrl} disabled={loading || subtitleLoading || shareUrlLoading}>
-              复制链接
-            </button>
             {subtitleEntries.length > 0 && (
               <button
                 type="button"

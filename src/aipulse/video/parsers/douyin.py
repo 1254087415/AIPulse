@@ -12,6 +12,8 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+from aipulse.video.downloader import VideoDownloader
+from aipulse.video.parsers._yt_dlp import extract_with_yt_dlp
 from aipulse.video.parsers.base import ContentParser, ParsedContent
 
 logger = logging.getLogger(__name__)
@@ -177,18 +179,38 @@ class DouyinParser(ContentParser):
         return any(domain in url for domain in self.supported_domains)
 
     async def parse(self, url: str, work_dir: Path) -> ParsedContent:
-        """Extract metadata from a Douyin share link."""
-        client = DouyinApiClient()
-        item_info = await client.parse_share_link(url)
-        return self._build_parsed_content(item_info, url)
+        """Extract metadata from a Douyin share link.
+
+        The public share-link API breaks whenever Douyin rotates its anti-bot
+        checks; fall back to yt-dlp (with browser cookies) when that happens.
+        """
+        try:
+            client = DouyinApiClient()
+            item_info = await client.parse_share_link(url)
+            return self._build_parsed_content(item_info, url)
+        except Exception:
+            logger.warning(
+                "Douyin share-link API failed for %s; falling back to yt-dlp",
+                url,
+                exc_info=True,
+            )
+            return await extract_with_yt_dlp(url, work_dir, "douyin")
 
     async def download(self, url: str, download_dir: Path, task_id: str) -> dict[str, Path]:
         """Download a Douyin video to the task work directory.
 
         Returns a dict compatible with VideoDownloader.download().
         """
-        client = DouyinApiClient()
-        item_info = await client.parse_share_link(url)
+        try:
+            client = DouyinApiClient()
+            item_info = await client.parse_share_link(url)
+        except Exception:
+            logger.warning(
+                "Douyin share-link API failed for %s; falling back to yt-dlp download",
+                url,
+                exc_info=True,
+            )
+            return await VideoDownloader(download_dir).download(url, task_id)
         work_dir = download_dir / task_id
         work_dir.mkdir(parents=True, exist_ok=True)
 

@@ -233,7 +233,7 @@ Phase 5：**失败处理 + 详情页**
 
 Phase 6：**E2E + 验证**
 - 真实 B站 UP主端到端测试
-- 真实 Kimi API 集成测试
+- 真实 LLM API 集成测试（2026-07-30 口径回写：实际执行为 MiniMax-M3，非 Kimi）
 - 真实 Obsidian 写入测试
 - 覆盖率 ≥ 80%
 
@@ -375,5 +375,5 @@ Phase 6：**E2E + 验证**
 
 ### Phase 8：E2E + 验证
 - 真实 B站 UP主端到端测试
-- 真实 Kimi API 集成测试
+- 真实 LLM API 集成测试（2026-07-30 口径回写：实际执行为 MiniMax-M3，非 Kimi）
 - 真实 Obsidian 写入测试

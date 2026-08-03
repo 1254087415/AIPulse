@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aipulse.core.datetime_utils import format_iso_utc
 from aipulse.scheduler.client import get_scheduler
 from aipulse.scheduler.models import SchedulerJobLog
 from aipulse.scheduler.serializers import serialize_job
@@ -71,8 +72,8 @@ async def list_logs(
                 "job_id": item.job_id,
                 "job_name": item.job_name,
                 "status": item.status,
-                "started_at": item.started_at.isoformat() if item.started_at else None,
-                "finished_at": item.finished_at.isoformat() if item.finished_at else None,
+                "started_at": format_iso_utc(item.started_at),
+                "finished_at": format_iso_utc(item.finished_at),
                 "message": item.message,
                 "exception": item.exception,
             }

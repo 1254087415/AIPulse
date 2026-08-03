@@ -135,6 +135,16 @@ class SummaryJobQueue:
 
         Returns the :class:`JobSubmission` so the caller can broadcast
         intermediate SSE events back to the HTTP layer.
+
+        **重要时序**: 调用方负责在 ``enqueue`` 返回后 **先 commit session
+        再让 worker 继续**。但 ``put_nowait`` 一调, worker task 立即
+        调度, 它的 mark_started 会开新 session 查 row —— 如果调用方这
+        边还没 commit, 跨 connection 看不到, NotFound。
+
+        ⚠️  生产代码应改用 :meth:`enqueue_submission` —— 先
+        ``repo.create()`` + ``session.commit()``, 再投递 submission,
+        避免该 race。本方法保留仅供 ``tests/unit/summarizers/test_queue.py``
+        验证 queue 自身契约。
         """
         await self._ensure_loop_state()
         record = await repo.create(
@@ -153,6 +163,21 @@ class SummaryJobQueue:
             size = self._queue.qsize()  # type: ignore[union-attr]
             # 不回滚 DB row：worker 空闲时会自然 drain queued records；
             # 回滚代价（额外的 repo.delete 方法 + commit 协调）不值
+            raise QueueFullError(size=size, max_size=QUEUE_MAX_SIZE) from None
+        return submission
+
+    async def enqueue_submission(self, submission: JobSubmission) -> JobSubmission:
+        """Enqueue a pre-built :class:`JobSubmission` without DB writes.
+
+        用于 retry 路由: 调用方先 ``repo.create()`` + ``session.commit()``,
+        再用本方法把已存在的 record id 投进队列。这样 ``put_nowait`` 触发
+        worker 调度时, record 已经 commit, 跨 connection 可见。
+        """
+        await self._ensure_loop_state()
+        try:
+            self._queue.put_nowait(submission)  # type: ignore[union-attr]
+        except asyncio.QueueFull:
+            size = self._queue.qsize()  # type: ignore[union-attr]
             raise QueueFullError(size=size, max_size=QUEUE_MAX_SIZE) from None
         return submission
 

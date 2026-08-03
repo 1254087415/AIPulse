@@ -84,9 +84,10 @@ class TestScanById:
                 return_value=httpx.Response(200, json=sample_uapi_payload)
             )
 
-            new_count = await scan_followed_up_by_id(followed_up_id)
+            outcome = await scan_followed_up_by_id(followed_up_id)
 
-        assert new_count == 2  # 两条新视频
+        # v0.3 round 6: 返回 ScanOutcome
+        assert outcome.new_hotspots == 2  # 两条新视频
 
         # 检查 hotspots 已写
         health = await client.get(f"/api/followed-up/{followed_up_id}/health")
@@ -97,9 +98,12 @@ class TestScanById:
 
     @pytest.mark.integration
     @pytest.mark.asyncio
-    async def test_scan_followed_up_by_id_not_found_returns_zero(self):
-        result = await scan_followed_up_by_id("nonexistent-id")
-        assert result == 0
+    async def test_scan_followed_up_by_id_not_found_raises(self):
+        """L1 #3：未知 id 必须 raise，不能静默返空 ScanOutcome。"""
+        from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
+
+        with pytest.raises(FollowedUpNotFoundError):
+            await scan_followed_up_by_id("nonexistent-id")
 
     @pytest.mark.integration
     @pytest.mark.asyncio
@@ -168,16 +172,16 @@ class TestSyncApi:
         body = sync_resp.json()["data"]
         assert body["status"] == "ok"
         assert body["new_videos"] == 2
+        # v0.3 round 6: sync 同时返回 enqueued_summaries（新 hotspot 入队数）
+        assert "enqueued_summaries" in body
+        assert isinstance(body["enqueued_summaries"], int)
 
     @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_sync_endpoint_404_for_missing_followed_up(self, client):
+        """L1 #3：sync 对未知 id 必须 404，不能返伪 202 + new_videos=0。"""
         sync_resp = await client.post("/api/followed-up/nonexistent/sync")
-        # 501 → 502 (sync failed) 因为 scan_followed_up_by_id 返回 0 而不抛
-        # 但 502 不该有 — 我看代码 _scan_one 不抛异常 → 0 → ok
-        assert sync_resp.status_code == 202
-        body = sync_resp.json()["data"]
-        assert body["new_videos"] == 0
+        assert sync_resp.status_code == 404
 
 
 class TestValidateEndpoint:

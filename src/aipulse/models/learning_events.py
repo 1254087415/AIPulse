@@ -30,7 +30,7 @@ class LearningEvent(Base):
     estimated_minutes: Mapped[int] = mapped_column(default=15)
     obsidian_task_created: Mapped[bool] = mapped_column(default=False)
     apple_reminder_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    apple_reminders_list: Mapped[str] = mapped_column(String(64), default="工作学习")
+    apple_reminders_list: Mapped[str] = mapped_column(String(64), default="学习")
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     learning_status: Mapped[str] = mapped_column(String(16), default="unread")
     created_at: Mapped[datetime] = mapped_column(default=now_utc)

@@ -1,6 +1,6 @@
 """Tests for the DecisionStatusStr regex schema (Phase 8 A5 FIX).
 
-Spec §3.0 / I7 requires that the five values be enforced at the schema
+Spec §3.0 / I7 requires that the canonical values be enforced at the schema
 boundary so any caller (API, scheduler, collector) fails fast on typos.
 """
 
@@ -19,9 +19,16 @@ class DecisionStatusProbe(BaseModel):
 
 
 @pytest.mark.unit
-def test_accepts_each_of_the_five_canonical_values() -> None:
+def test_accepts_each_of_the_canonical_values() -> None:
     """All spec §3.0 values must pass."""
-    for value in ("pending", "worth_learning", "worth_notified", "skipped", "failed"):
+    for value in (
+        "pending",
+        "worth_learning",
+        "worth_notified",
+        "skipped",
+        "failed",
+        "archived",
+    ):
         model = DecisionStatusProbe(decision_status=value)
         assert model.decision_status == value
 

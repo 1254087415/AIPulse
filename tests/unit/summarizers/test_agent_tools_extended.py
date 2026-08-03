@@ -1436,15 +1436,11 @@ class TestFetchTranscriptSignatureGuard:
 
 
 class TestSendNotificationAppleRemindersList:
-    """send_notification 工具必须调 create_reminder(..., list_name='AIPulse测试')。
-
-    feedback_tests-must-isolate-apple-reminders 硬约束：tests 只能往
-    AIPulse测试 list 写，永远不污染真实业务列表（"工作学习"/"提醒"等）。
-    """
+    """send_notification 必须按总结主题选择真实业务列表。"""
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_send_notification_uses_aipulse_test_list(self) -> None:
+    async def test_send_notification_test_override_uses_aipulse_test_list(self) -> None:
         from unittest.mock import AsyncMock, patch
 
         from aipulse.summarizers.agent.tools import send_notification
@@ -1469,7 +1465,8 @@ class TestSendNotificationAppleRemindersList:
                     {
                         "note_path": str(note_path),
                         "scheduled_at": "2026-07-27T00:00:00Z",
-                        "topic": "测试主题",
+                        "topic": "AI 测试主题",
+                        "reminder_list": "AIPulse测试",
                     }
                 )
 

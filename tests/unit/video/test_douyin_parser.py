@@ -89,6 +89,48 @@ async def test_douyin_api_client_download_creates_directory(tmp_path):
     assert filepath.read_bytes() == b"videodata"
 
 
+@pytest.mark.unit
+async def test_douyin_parser_parse_falls_back_to_yt_dlp(tmp_path):
+    """分享页 API 失效时，parse 应回退到 yt-dlp 提取。"""
+    fallback = ParsedContent(platform="douyin", url="https://www.douyin.com/video/1", title="yt-dlp title")
+    parser = DouyinParser()
+    with (
+        patch("aipulse.video.parsers.douyin.DouyinApiClient") as mock_client_cls,
+        patch(
+            "aipulse.video.parsers.douyin.extract_with_yt_dlp",
+            new=AsyncMock(return_value=fallback),
+        ) as mock_yt_dlp,
+    ):
+        mock_client_cls.return_value.parse_share_link = AsyncMock(
+            side_effect=ValueError("无法从分享页提取数据")
+        )
+        result = await parser.parse("https://www.douyin.com/video/1", tmp_path)
+
+    assert result is fallback
+    mock_yt_dlp.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_douyin_parser_download_falls_back_to_yt_dlp(tmp_path):
+    """分享页 API 失效时，download 应回退到通用 yt-dlp 下载器。"""
+    expected = {"video_path": tmp_path / "v.mp4", "audio_path": tmp_path / "v.mp4", "work_dir": tmp_path}
+    parser = DouyinParser()
+    with (
+        patch("aipulse.video.parsers.douyin.DouyinApiClient") as mock_client_cls,
+        patch("aipulse.video.parsers.douyin.VideoDownloader") as mock_downloader_cls,
+    ):
+        mock_client_cls.return_value.parse_share_link = AsyncMock(
+            side_effect=ValueError("无法从分享页提取数据")
+        )
+        mock_downloader_cls.return_value.download = AsyncMock(return_value=expected)
+        result = await parser.download("https://www.douyin.com/video/1", tmp_path, "task_1")
+
+    assert result == expected
+    mock_downloader_cls.return_value.download.assert_awaited_once_with(
+        "https://www.douyin.com/video/1", "task_1"
+    )
+
+
 async def async_iter(chunks):
     for chunk in chunks:
         yield chunk

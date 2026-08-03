@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aipulse.core.datetime_utils import format_iso_utc
 from aipulse.repositories.summary_job_repo import (
     SqlAlchemySummaryJobRepository,
     SummaryJobRecord,
@@ -43,10 +44,10 @@ def _serialize(record: SummaryJobRecord) -> dict[str, Any]:
         "reminder_id": record.reminder_id,
         "steps_emitted": record.steps_emitted,
         "intermediate_steps": record.intermediate_steps,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-        "started_at": record.started_at.isoformat() if record.started_at else None,
-        "completed_at": record.completed_at.isoformat() if record.completed_at else None,
+        "created_at": format_iso_utc(record.created_at),
+        "updated_at": format_iso_utc(record.updated_at),
+        "started_at": format_iso_utc(record.started_at),
+        "completed_at": format_iso_utc(record.completed_at),
     }
 
 
@@ -114,19 +115,43 @@ async def enqueue_summary_route(
             if up is not None:
                 up_name = up.display_name
 
-    from aipulse.summarizers.queue import QueueFullError, get_queue
+    from aipulse.summarizers.queue import (
+        JobSubmission,
+        QueueFullError,
+        get_queue,
+    )
 
     queue = get_queue()
     await queue.start()
+
+    # 关键时序: 必须先 ``repo.create()`` + ``session.commit()``, 再
+    # ``queue.enqueue_submission()`` 把已存在的 record id 投进队列。
+    # 旧版用 ``queue.enqueue()``: 它内部还会 ``repo.create()`` 出一条 row,
+    # 紧接着 ``put_nowait`` 触发 worker 调度, 但本次路由 ``session.commit()``
+    # 还在后面 —— worker 立即 mark_started 时该 row 还在路由 session 里
+    # 未 commit, worker 自己的新 session 看不到 → SummaryJobNotFoundError.
+    # 与 ``retry_job_route`` 同款修复模式 (verifier R3 已批准)。
     try:
-        submission = await queue.enqueue(
-            repo,
+        record = await repo.create(
             video_id=video_id,
             title=title or "",
             up_name=up_name or "",
         )
-    except QueueFullError as exc:
+    except Exception as exc:  # noqa: BLE001
         await session.rollback()
+        raise
+    await session.commit()
+    submission = JobSubmission(
+        job_id=record.id,
+        video_id=video_id,
+        title=title or "",
+        up_name=up_name or "",
+    )
+    try:
+        await queue.enqueue_submission(submission)
+    except QueueFullError as exc:
+        # row 已 commit (audit trail 保留), 但 worker 不会处理。spec §5.5
+        # QUEUE_FULL 是 backpressure, 调用方应在 worker 释放后重试。
         raise HTTPException(
             status_code=429,
             detail={
@@ -143,7 +168,7 @@ async def enqueue_summary_route(
             title=title,
             up_name=up_name,
         )
-    await session.commit()
+        await session.commit()
 
     return {
         "success": True,
@@ -210,8 +235,15 @@ async def retry_job_route(
     queue = get_queue()
     await queue.start()
 
-    # 复用 enqueue，但先直接复用 record 已经是 queued state →
-    # 我们手动写一条新 row + push 到 queue
+    # 关键时序: 必须 **先 commit 再 enqueue_submission**。不能用
+    # ``queue.enqueue`` 因为它内部会再 ``repo.create()`` 出一条 row,
+    # worker 立即拿到 submission 去 mark_started 时, 该 row 还在路由
+    # session 里未 commit, worker 自己的新 session 跨 connection 看不到
+    # → SummaryJobNotFoundError (路径 C v0.3 E2E 已踩到)。
+    # 修法: 调用方自己 ``repo.create()`` + ``session.commit()``,
+    # 然后 ``enqueue_submission`` 把已存在的 record id 投进队列。
+    from aipulse.summarizers.queue import JobSubmission
+
     repo2 = SqlAlchemySummaryJobRepository(session)
     record = await repo2.create(
         video_id=old.video_id,
@@ -220,16 +252,15 @@ async def retry_job_route(
     )
     if old.hotspot_id:
         await repo2.annotate(record.id, hotspot_id=old.hotspot_id)
-    await session.commit()
+    await session.commit()  # 必须在 enqueue_submission 前 commit
 
-    submission = await queue.enqueue(
-        repo2,
+    submission = JobSubmission(
+        job_id=record.id,
         video_id=old.video_id,
         title=old.title or "",
         up_name=old.up_name or "",
     )
-    # overwrite the job_id with the freshly-created one (queue already used it)
-    # Actually submission.job_id == record.id at this point
+    await queue.enqueue_submission(submission)
     return {
         "success": True,
         "data": {

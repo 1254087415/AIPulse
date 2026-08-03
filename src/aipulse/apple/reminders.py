@@ -15,14 +15,21 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# spec 06 §7.2：业务列表按 topic 关键字分类选单。
-# 测试走 AIPulse测试 列表（feedback_tests-must-isolate-apple-reminders 硬约束）；
-# 这里只覆盖生产路径的默认映射。
+# 业务列表按总结主题关键字分类选单。
 _TOPIC_TO_LIST: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
-        "工作学习",
+        "工作",
         (
-            "工作学习",
+            "工作",
+            "职场",
+            "办公",
+            "职业",
+            "团队管理",
+        ),
+    ),
+    (
+        "学习",
+        (
             "学习",
             "AI",
             "技术",
@@ -46,7 +53,7 @@ _DEFAULT_LIST = "琐碎生活"
 def pick_list_for_topic(topic: str) -> str:
     """按 topic 关键字匹配 spec 06 §7.2 的 3 业务列表。
 
-    匹配优先级：``工作学习`` > ``搞钱！！！`` > 默认 ``琐碎生活``。
+    匹配优先级：``工作`` > ``学习`` > ``搞钱！！！`` > 默认 ``琐碎生活``。
     ``topic`` 是 None / 空 → 返回默认 ``琐碎生活``。
     """
     if not topic:
