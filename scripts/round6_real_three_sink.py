@@ -7,7 +7,7 @@ MiniMax API；create_obsidian_note / create_learning_event / send_notification
 
   1. DB hotspots (sync 阶段已写) + learning_events (create_learning_event)
   2. Obsidian .md (create_obsidian_note → 真 vault)
-  3. Apple Reminders AIPulse测试 (send_notification → osascript)
+  3. Apple Reminders AIPulse测试 列表 (send_notification → osascript)
 
 使用：DATABASE_URL=... uv run python scripts/round6_real_three_sink.py
 """
@@ -30,6 +30,7 @@ BVID = "BV1PbEnzfEP2"
 TITLE = "【罗翔】人工智能是价值中立吗？AI的相对主义提供没有对错的多元答案是好事情吗？"
 UP_NAME = "罗翔说刑法"
 TOPIC = "AI价值中立与相对主义"  # 30 字以内
+TEST_REMINDERS_LIST = "AIPulse测试"
 
 
 async def main() -> int:
@@ -118,6 +119,7 @@ async def main() -> int:
             "note_path": note_path,
             "scheduled_at": scheduled_at,
             "topic": TOPIC,
+            "reminder_list": TEST_REMINDERS_LIST,
         }
     )
     # 注意：macOS osascript 经常出现 5s 超时但 reminder 实际已创建的情况（Apple
@@ -127,7 +129,7 @@ async def main() -> int:
 
     check = subprocess.run(
         ["osascript", "-e",
-         f'tell application "Reminders" to get name of every reminder of list "AIPulse测试"'],
+         f'tell application "Reminders" to get name of every reminder of list "{TEST_REMINDERS_LIST}"'],
         capture_output=True, text=True, timeout=10,
     )
     names_in_list = check.stdout.strip() if check.returncode == 0 else ""

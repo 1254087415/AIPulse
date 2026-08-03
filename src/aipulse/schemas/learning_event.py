@@ -27,7 +27,7 @@ class LearningEventCreate(BaseModel):
     estimated_minutes: int | None = Field(default=None, ge=1, le=1440)
     summary_note_path: str | None = Field(default=None, max_length=512)
     platform: PlatformStr = "bilibili"
-    apple_reminders_list: str = Field(default="工作学习", max_length=64)
+    apple_reminders_list: str = Field(default="学习", max_length=64)
 
 
 class LearningEventResponse(BaseModel):

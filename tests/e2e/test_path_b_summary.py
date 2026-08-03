@@ -105,6 +105,7 @@ ANCHOR_UP_NAME = "罗翔说刑法"
 ANCHOR_TOPIC_BASE = "AI价值中立与相对主义"
 E2E_MARKER = "E2E-TEST"
 TOPIC = f"{E2E_MARKER} {ANCHOR_TOPIC_BASE}"
+TEST_REMINDERS_LIST = "AIPulse测试"
 
 # transcript cache 在主 checkout 已存在；复制到 test DATA_DIR。
 ANCHOR_TRANSCRIPT_SRC = (
@@ -588,6 +589,7 @@ async def e2e_run(
                 "note_path": note_path,
                 "scheduled_at": scheduled_at,
                 "topic": TOPIC,
+                "reminder_list": TEST_REMINDERS_LIST,
             }
         )
         captured_steps.append(
@@ -644,8 +646,8 @@ async def e2e_run(
         pre_existing_files = (
             set(archive_dir.glob("*.md")) if archive_dir.exists() else set()
         )
-        pre_existing_reminders = _list_reminders_in_list("AIPulse测试")
-        pre_existing_list_existed = bool(pre_existing_reminders) or _list_exists("AIPulse测试")
+        pre_existing_reminders = _list_reminders_in_list(TEST_REMINDERS_LIST)
+        pre_existing_list_existed = bool(pre_existing_reminders) or _list_exists(TEST_REMINDERS_LIST)
 
         # ---- 6. TC-01: POST /api/summary/{bvid} → 202 + queued ----
         post_resp = await client.post(
@@ -845,7 +847,11 @@ async def e2e_run(
             )
 
         try:
-            _delete_entire_list("AIPulse测试")
+            _delete_reminders_with_retry(
+                TEST_REMINDERS_LIST,
+                E2E_MARKER,
+                TOPIC,
+            )
         except Exception as exc:
             print(
                 f"[teardown] reminder cleanup error ({type(exc).__name__}): {exc}",
@@ -1041,7 +1047,7 @@ async def test_e2e_path_b_summary_three_sink(e2e_run: dict) -> None:
     db_reminder_id = e2e_run["summary_job_reminder_id"]
     db_ok = bool(db_reminder_id)
 
-    # OS 端交叉验证：AIPulse测试 列表里 E2E-TEST 标记的 reminder（不论新旧）
+    # OS 端交叉验证：AIPulse测试列表里 E2E-TEST 标记的 reminder（不论新旧）
     names_in_list: list[str] = []
     try:
         result = subprocess.run(
@@ -1049,7 +1055,7 @@ async def test_e2e_path_b_summary_three_sink(e2e_run: dict) -> None:
                 "osascript",
                 "-e",
                 'tell application "Reminders" to get name of every reminder '
-                'of list "AIPulse测试"',
+                f'of list "{TEST_REMINDERS_LIST}"',
             ],
             capture_output=True,
             text=True,

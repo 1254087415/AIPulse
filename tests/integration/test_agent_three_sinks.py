@@ -6,7 +6,7 @@
      任何 hotspot / summary_job / learning_event 都写到 tmp_path 下的 aipulse.db。
   2. ``feedback_tests-must-isolate-apple-reminders`` — ``fake_reminders`` fixture
      替换 ``aipulse.apple.reminders.create_reminder``，只写到 in-memory 列表，
-     不碰 ``AIPulse测试`` 之外的 macOS Reminders 列表。
+     不碰 macOS Reminders 实际列表。
   3. ``feedback_no-mock-backend-e2e`` — fetch_transcript 走真 httpx（respx mock
      api.bilibili.com 返回真实结构），不伪造 transcript 文本；summarize 走 fake
      LLM adapter 返真实结构化 markdown，judge_tech_relevance 返真实 JSON。
@@ -117,8 +117,6 @@ def fake_vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def fake_reminders(monkeypatch: pytest.MonkeyPatch):
     """Mock Apple Reminders —— 写到 in-memory dict，不碰 macOS 真实 Reminders。
 
-    feedback_tests-must-isolate-apple-reminders 硬约束：
-    tests 只走 ``AIPulse测试`` 列表名（与 send_notification 工具硬隔离一致），
     不允许在测试 fixture 里调 osascript 真打 Reminders app。
     """
     fake_state: dict[str, list[dict]] = {"reminders": []}
@@ -128,7 +126,7 @@ def fake_reminders(monkeypatch: pytest.MonkeyPatch):
         due_date: str,
         notes: str = "",
         *,
-        list_name: str = "AIPulse测试",
+        list_name: str | None = None,
         executor_timeout_s: float = 5.0,
     ) -> str:
         rid = "fake-rem-" + str(len(fake_state["reminders"]))
@@ -262,7 +260,7 @@ def fake_run_summary_pipeline(monkeypatch: pytest.MonkeyPatch):
                 "video_id": video_id,
                 "note_path": note_path,
                 "scheduled_at": scheduled_at,
-                "topic": title[:30] or "round 6 fake topic",
+                "topic": f"AI {title[:27]}" if title else "AI round 6 fake topic",
             }
         )
         if not event_res.get("ok"):
@@ -281,7 +279,8 @@ def fake_run_summary_pipeline(monkeypatch: pytest.MonkeyPatch):
             {
                 "note_path": note_path,
                 "scheduled_at": scheduled_at,
-                "topic": title[:30] or "round 6 fake topic",
+                "topic": f"AI {title[:27]}" if title else "AI round 6 fake topic",
+                "reminder_list": "AIPulse测试",
             }
         )
 
@@ -508,7 +507,7 @@ async def test_sync_then_drive_six_tools_3way_lands(
                 "video_id": REAL_BVID,
                 "note_path": note_path_str,
                 "scheduled_at": scheduled_at,
-                "topic": "三向归档真链路",
+                "topic": "AI 三向归档真链路",
             }
         )
         assert event_result["ok"] is True, event_result
@@ -520,7 +519,8 @@ async def test_sync_then_drive_six_tools_3way_lands(
             {
                 "note_path": note_path_str,
                 "scheduled_at": scheduled_at,
-                "topic": "三向归档真链路",
+                "topic": "AI 三向归档真链路",
+                "reminder_list": "AIPulse测试",
             }
         )
         assert notif_result.get("ok") is True, notif_result

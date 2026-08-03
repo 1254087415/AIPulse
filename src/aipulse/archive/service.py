@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,28 @@ class ArchiveOutcome:
         return bool(self.note_path and not self.errors)
 
 
+async def _send_notification(
+    note_path: str,
+    *,
+    scheduled_at: str,
+    topic: str,
+) -> dict[str, Any] | None:
+    """Run the shared notification tool when available.
+
+    ``None`` preserves the legacy file-only fallback used by focused tests.
+    """
+    from aipulse.summarizers.agent.tools import send_notification as _sn
+
+    if not hasattr(_sn, "coroutine"):
+        return None
+    result = await _sn.coroutine(
+        note_path=note_path,
+        scheduled_at=scheduled_at,
+        topic=topic,
+    )
+    return cast(dict[str, Any], result)
+
+
 async def append_obsidian_task(
     note_path: str,
     *,
@@ -38,13 +60,11 @@ async def append_obsidian_task(
     """
     from datetime import datetime
 
-    from aipulse.summarizers.agent.tools import send_notification as _sn
-
-    res = await _sn.coroutine(  # type: ignore[attr-defined]
-        note_path=note_path,
+    res = await _send_notification(
+        note_path,
         scheduled_at=scheduled_at,
         topic=topic,
-    ) if hasattr(_sn, "coroutine") else None
+    )
     if res is not None:
         return bool(res.get("obsidian_task"))
 
@@ -76,7 +96,7 @@ async def record_learning_event(
     _cle = agent_tools.create_learning_event
     scheduled = scheduled_at
     # 工具期望 ISO8601；如果传过来是 None 给出 ISO
-    res = await _cle.ainvoke(  # type: ignore[attr-defined]
+    res: dict[str, Any] = await _cle.ainvoke(
         {
             "video_id": video_id,
             "note_path": note_path,
@@ -85,7 +105,8 @@ async def record_learning_event(
         }
     )
     if res.get("ok"):
-        return res.get("event_id")
+        event_id = res.get("event_id")
+        return event_id if isinstance(event_id, str) else None
     logger.warning("record_learning_event failed: %s", res.get("error"))
     return None
 
@@ -140,29 +161,22 @@ async def archive_three_way(
     if event_id is None:
         errors.append("learning_event")
 
-    # 第三步：通知 (Obsidian Task 必填；Apple Reminders 容错)
-    task_ok = await append_obsidian_task(
-        note_path, scheduled_at=scheduled_at, topic=topic
+    # 第三步：通知（一次调用同时追加 Obsidian Task 与创建 Reminder，避免重复写入）。
+    notification = await _send_notification(
+        note_path,
+        scheduled_at=scheduled_at,
+        topic=topic,
     )
-    reminder_id: Optional[str] = None
+    if notification is None:
+        task_ok = await append_obsidian_task(
+            note_path, scheduled_at=scheduled_at, topic=topic
+        )
+        reminder_id: Optional[str] = None
+    else:
+        task_ok = bool(notification.get("obsidian_task"))
+        reminder_id = notification.get("reminder_id")
     if not task_ok:
         errors.append("obsidian_task")
-
-    try:
-        import platform
-        import sys
-
-        if sys.platform == "darwin":
-            from aipulse.apple.reminders import create_reminder
-
-            reminder_id = await create_reminder(
-                title=topic,
-                due_date=scheduled_at,
-                notes=f"AIPulse 学习提醒\n笔记：{note_path}",
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.info("Apple Reminders unavailable: %s", exc)
-        # 容错：不写进 errors（spec：Apple Reminders 失败不影响整体）
 
     return ArchiveOutcome(
         note_path=note_path,

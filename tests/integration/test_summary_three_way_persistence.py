@@ -6,7 +6,7 @@
 3. DB ``summary_jobs`` 行 status=completed（L6 三件齐 → completed 路径）
 4. DB ``learning_events`` ≥ 1 行（pipeline create_learning_event 写入）
 5. Obsidian vault ``.md`` 文件存在 + frontmatter 完整
-6. Apple Reminders ``AIPulse测试`` 列表 ≥ 1 项（macOS；其他平台 skip）
+6. Apple Reminders ``学习`` 列表 ≥ 1 项（macOS；其他平台 skip）
 
 策略：
 - 不调真 Kimi / B站：patch ``run_summary_pipeline`` 返回完整 success 结果。
@@ -61,7 +61,7 @@ def fake_reminders(monkeypatch: pytest.MonkeyPatch):
         due_date: str,
         notes: str = "",
         *,
-        list_name: str = "AIPulse测试",
+        list_name: str | None = None,
         executor_timeout_s: float = 5.0,
     ) -> str:
         rid = "fake-rem-" + str(len(fake_state["reminders"]))
@@ -255,8 +255,7 @@ async def test_summary_three_way_persistence_on_real_bvid(
     assert "model: kimi-for-coding" in content
 
     # 6. Apple Reminders list 配置（fake fixture 已生效；真 macOS 链路
-    # 由 send_notification 工具调用 create_reminder(..., list_name="AIPulse测试")
-    # 写入 Reminders 应用；这里只验 fake 注入的 list_name 是 "AIPulse测试"）
+    # 由 send_notification 工具按主题选择业务列表。
     assert fake["reminders"]["reminders"] == []  # send_notification 工具在 fake_pipeline 下未跑
 
 
@@ -502,19 +501,20 @@ async def test_short_bvid_e2e_three_way_lands(
             "video_id": SHORT_BVID,
             "note_path": note_path_str,
             "scheduled_at": scheduled_at,
-            "topic": "短字幕真链路测试",
+            "topic": "AI 短字幕真链路测试",
         }
     )
     assert event_result["ok"] is True, event_result
     event_id = event_result["event_id"]
     assert event_id, "create_learning_event 应返回 event_id"
 
-    # 6. send_notification（真调 fake_create_reminder 写入 AIPulse测试 列表）
+    # 6. send_notification（真调 fake_create_reminder 写入 AIPulse测试列表）
     notif_result = await tools_mod.send_notification.ainvoke(
         {
             "note_path": note_path_str,
             "scheduled_at": scheduled_at,
-            "topic": "短字幕真链路测试",
+            "topic": "AI 短字幕真链路测试",
+            "reminder_list": "AIPulse测试",
         }
     )
     assert notif_result.get("ok") is True, notif_result
@@ -628,5 +628,5 @@ async def test_short_bvid_e2e_three_way_lands(
         f"Apple Reminders 'AIPulse测试' 列表应 ≥ 1 条，got {len(fake['reminders']['reminders'])}"
     )
     reminder = fake["reminders"]["reminders"][0]
-    assert reminder["list"] == "AIPulse测试"  # 隔离真实 Reminders 列表
+    assert reminder["list"] == "AIPulse测试"
     assert SHORT_BVID in reminder["notes"] or "AIPulse" in reminder["title"]

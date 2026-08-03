@@ -16,7 +16,7 @@ Covers spec 09 §5.3 ``TC-E2E-PATH-C-01..05`` in a single real-pipeline run:
   Reminders 真写入)。这等价于「改回正确 API key → 重新入队 → 走通三方向」。
 
 真实副作用 + E2E-TEST 标记 + teardown 删除沿用 path B 纪律:
-- Reminders AIPulse测试 列表不存在
+- Reminders AIPulse测试列表只删除 E2E-TEST 标记事项
 - Obsidian vault 无 E2E-TEST 残留
 - DB 临时库, 不碰主 checkout 的 data/aipulse.db
 """
@@ -96,7 +96,8 @@ ANCHOR_TITLE = (
 ANCHOR_UP_NAME = "罗翔说刑法"
 ANCHOR_UP_UID = "517327498"
 E2E_MARKER = "E2E-TEST"
-TOPIC = f"{E2E_MARKER} pathC 失败重试链路验收"
+TOPIC = f"{E2E_MARKER} AI pathC 失败重试链路验收"
+TEST_REMINDERS_LIST = "AIPulse测试"
 SYNTHETIC_500_MARKER = "synthetic-500"
 
 ANCHOR_TRANSCRIPT_SRC = (
@@ -110,15 +111,17 @@ ANCHOR_TRANSCRIPT_SRC = (
 # =====================================================================
 
 
-def _delete_entire_list(list_name: str) -> bool:
+def _delete_test_reminders(list_name: str, marker: str) -> bool:
     list_esc = list_name.replace("\\", "\\\\").replace('"', '\\"')
+    marker_esc = marker.replace("\\", "\\\\").replace('"', '\\"')
     script = f'''
     tell application "Reminders"
         if (exists list "{list_esc}") then
             set targetList to list "{list_esc}"
-            delete every reminder of targetList
-            delete targetList
-            return "deleted"
+            repeat with r in (every reminder of targetList)
+                if (name of r as text) contains "{marker_esc}" then delete r
+            end repeat
+            return "cleaned"
         end if
         return "absent"
     end tell
@@ -129,15 +132,15 @@ def _delete_entire_list(list_name: str) -> bool:
         )
         if result.returncode != 0:
             print(
-                f"[teardown] _delete_entire_list rc={result.returncode}: "
+                f"[teardown] _delete_test_reminders rc={result.returncode}: "
                 f"{result.stderr.strip()[:200]!r}",
                 file=sys.stderr,
             )
             return False
-        return result.stdout.strip() == "deleted"
+        return result.stdout.strip() == "cleaned"
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
         print(
-            f"[teardown] _delete_entire_list error ({type(exc).__name__}): {exc}",
+            f"[teardown] _delete_test_reminders error ({type(exc).__name__}): {exc}",
             file=sys.stderr,
         )
         return False
@@ -188,7 +191,7 @@ async def e2e_run(
       patcher 切到 real mode 走 path B 6-tool 直驱 + 真 LLM, 终态
       ``completed`` + 三方向落盘。
 
-    Teardown: 删除 E2E-TEST-marked Obsidian .md + AIPulse测试 列表。
+    Teardown: 删除 E2E-TEST-marked Obsidian .md + AIPulse测试列表中的测试事项。
     """
     from sqlalchemy import select
 
@@ -462,6 +465,7 @@ async def e2e_run(
                 "note_path": note_path,
                 "scheduled_at": scheduled_at,
                 "topic": TOPIC,
+                "reminder_list": TEST_REMINDERS_LIST,
             }
         )
         bucket.append(
@@ -489,7 +493,7 @@ async def e2e_run(
     pre_existing_files = (
         set(archive_dir.glob("*.md")) if archive_dir.exists() else set()
     )
-    pre_existing_reminders = _list_reminders_in_list("AIPulse测试")
+    pre_existing_reminders = _list_reminders_in_list(TEST_REMINDERS_LIST)
 
     try:
         # ---- 4. Seed DB rows ----
@@ -659,7 +663,7 @@ async def e2e_run(
             )
 
         try:
-            _delete_entire_list("AIPulse测试")
+            _delete_test_reminders(TEST_REMINDERS_LIST, E2E_MARKER)
         except Exception as exc:
             print(
                 f"[teardown] reminder cleanup error ({type(exc).__name__}): {exc}",
@@ -987,7 +991,7 @@ async def test_e2e_path_c_failure_inject_then_retry(e2e_run: dict) -> None:
             f"got {latest_for_video.get('status')!r}"
         )
     # (g) reminder 双路 OR 断言: DB 写入了 reminder_id, 或 OS 端
-    # AIPulse测试 列表有 E2E-TEST 标记的 reminder
+    # AIPulse测试列表有 E2E-TEST 标记的 reminder
     db_reminder_id = sj2_reminder_id
     db_ok = bool(db_reminder_id)
 
@@ -998,7 +1002,7 @@ async def test_e2e_path_c_failure_inject_then_retry(e2e_run: dict) -> None:
                 "osascript",
                 "-e",
                 'tell application "Reminders" to get name of every reminder '
-                'of list "AIPulse测试"',
+                f'of list "{TEST_REMINDERS_LIST}"',
             ],
             capture_output=True,
             text=True,

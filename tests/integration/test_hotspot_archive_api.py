@@ -3,7 +3,7 @@
 验证 archive API 调 ``archive_three_way()`` 三方向存储：
 - DB learning_events
 - Obsidian Task checkbox
-- Apple Reminders（mock fake_reminders，list_name='AIPulse测试' 硬隔离）
+- Apple Reminders（mock fake_reminders，按总结主题选业务列表）
 
 不依赖真外部 LLM/网络；Apple Reminders mock 走 fake_reminders。
 """
@@ -43,7 +43,7 @@ def fake_vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def fake_reminders(monkeypatch: pytest.MonkeyPatch):
-    """Mock Apple Reminders — 走 in-memory 列表；list_name 硬隔离 ``AIPulse测试``。"""
+    """Mock Apple Reminders — 走 in-memory 列表，不触发 macOS 副作用。"""
     fake_state: dict[str, list[dict]] = {"reminders": []}
 
     async def fake_create_reminder(
@@ -51,7 +51,7 @@ def fake_reminders(monkeypatch: pytest.MonkeyPatch):
         due_date: str,
         notes: str = "",
         *,
-        list_name: str = "AIPulse测试",
+        list_name: str | None = None,
         executor_timeout_s: float = 5.0,
     ) -> str:
         rid = "fake-rem-" + str(len(fake_state["reminders"]))
@@ -136,12 +136,9 @@ async def test_archive_hotspot_three_way_lands(
     body_text = Path(data["note_path"]).read_text("utf-8")
     assert "- [ ] ⏰" in body_text
 
-    # 3. Apple Reminders 写入 fake_reminders 且 list 硬隔离
-    # archive_three_way + tools.send_notification 各调一次 create_reminder，
-    # 所以 ≥1 是契约正确状态；list 永远是 AIPulse测试。
-    assert len(fake_reminders["reminders"]) >= 1
-    for rem in fake_reminders["reminders"]:
-        assert rem["list"] == "AIPulse测试"
+    # 3. Apple Reminders 只创建一条，并按学习类总结落到「学习」列表。
+    assert len(fake_reminders["reminders"]) == 1
+    assert fake_reminders["reminders"][0]["list"] == "学习"
 
     # 4. learning_events 真行
     from sqlalchemy import select
