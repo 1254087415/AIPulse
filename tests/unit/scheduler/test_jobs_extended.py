@@ -515,17 +515,19 @@ class TestUpsertHotspotFromVideo:
 class TestScanFollowedUpById:
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_returns_zero_when_missing(self, db_session):
+    async def test_raises_when_missing(self, db_session):
+        """L1 #3：未知 id 必须 raise，不能静默返空 ScanOutcome。"""
+        from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
         from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
 
-        result = await scan_followed_up_by_id("does-not-exist")
-        # v0.3 round 6: 返回 ScanOutcome
-        assert result.new_hotspots == 0
-        assert result.enqueued_summaries == 0
+        with pytest.raises(FollowedUpNotFoundError):
+            await scan_followed_up_by_id("does-not-exist")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_returns_zero_when_soft_deleted(self, db_session):
+    async def test_raises_when_soft_deleted(self, db_session):
+        """L1 #3：已软删的 id 也必须 raise，不能静默返空 ScanOutcome。"""
+        from aipulse.repositories.followed_up_repo import FollowedUpNotFoundError
         from aipulse.scheduler.jobs.followed_up_scan import scan_followed_up_by_id
 
         fu = FollowedUp(
@@ -539,9 +541,8 @@ class TestScanFollowedUpById:
         await db_session.commit()
         await db_session.refresh(fu)
 
-        result = await scan_followed_up_by_id(fu.id)
-        assert result.new_hotspots == 0
-        assert result.enqueued_summaries == 0
+        with pytest.raises(FollowedUpNotFoundError):
+            await scan_followed_up_by_id(fu.id)
 
 
 class TestScanAllFollowedUp:

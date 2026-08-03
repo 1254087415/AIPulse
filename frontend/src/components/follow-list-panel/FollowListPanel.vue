@@ -13,12 +13,15 @@
  * the list and the surrounding chrome.
  */
 import { computed, ref, onMounted } from 'vue'
+import { router } from '../../router'
 import AddFollowForm from './AddFollowForm.vue'
 import FollowCard from './FollowCard.vue'
 import HealthBadge from '../health-badge/HealthBadge.vue'
 import AppButton from '../ui/AppButton.vue'
+import ConfirmModal from '../ui/ConfirmModal.vue'
 import PageHeader from '../ui/PageHeader.vue'
 import { listFollowed, createFollowed, type FollowedUp, type FollowedUpCreate } from '../../api/followedUp'
+import { followApi } from '../../api/follow'
 
 interface PanelError {
   message: string
@@ -34,6 +37,9 @@ const loadError = ref<string>('')
 const showAddForm = ref<boolean>(false)
 const submitting = ref<boolean>(false)
 const createError = ref<PanelError | null>(null)
+const actionError = ref<string>('')
+const deleteTarget = ref<FollowedUp | null>(null)
+const mutatingId = ref<string | null>(null)
 
 const sortedItems = computed<FollowedUp[]>(() => {
   return [...items.value].sort((a, b) => {
@@ -70,11 +76,13 @@ const fetchList = async (): Promise<void> => {
 const openAddForm = (): void => {
   showAddForm.value = true
   createError.value = null
+  actionError.value = ''
 }
 
 const cancelAddForm = (): void => {
   showAddForm.value = false
   createError.value = null
+  actionError.value = ''
 }
 
 const submitAddForm = async (payload: FollowedUpCreate): Promise<void> => {
@@ -83,6 +91,7 @@ const submitAddForm = async (payload: FollowedUpCreate): Promise<void> => {
   try {
     await createFollowed(payload)
     showAddForm.value = false
+    actionError.value = ''
     await fetchList()
   } catch (error: unknown) {
     createError.value = {
@@ -94,20 +103,66 @@ const submitAddForm = async (payload: FollowedUpCreate): Promise<void> => {
   }
 }
 
-const onRemove = async (id: string): Promise<void> => {
-  items.value = items.value.filter((item) => item.id !== id)
+const onRemove = (id: string): void => {
+  actionError.value = ''
+  deleteTarget.value = items.value.find((item) => item.id === id) ?? null
 }
 
-const onSync = async (_id: string): Promise<void> => {
-  // Sync is delegated to a parent-driven mutation in later phases; for now
-  // surface a lightweight feedback through loadError so the user sees action.
-  await fetchList()
+const onConfirmRemove = async (): Promise<void> => {
+  const target = deleteTarget.value
+  if (!target || mutatingId.value) return
+  mutatingId.value = target.id
+  try {
+    await followApi.remove(target.id)
+    actionError.value = ''
+    deleteTarget.value = null
+    await fetchList()
+  } catch (error: unknown) {
+    actionError.value = extractMessage(error, '删除失败')
+  } finally {
+    mutatingId.value = null
+  }
 }
 
 const onEdit = (id: string): void => {
-  // Phase 2+ — wire to the detail view. For Phase 1 we simply surface a hint.
-  loadError.value = `编辑 ${id} 将在 Phase 2 启用`
+  const item = items.value.find((candidate) => candidate.id === id)
+  if (item) void router.push(`/followed-up/${encodeURIComponent(item.uid)}`)
 }
+
+const onSync = async (id: string): Promise<void> => {
+  if (mutatingId.value) return
+  mutatingId.value = id
+  try {
+    await followApi.scanNow(id)
+    actionError.value = ''
+    await fetchList()
+  } catch (error: unknown) {
+    actionError.value = extractMessage(error, '同步失败')
+  } finally {
+    mutatingId.value = null
+  }
+}
+
+const onToggle = async (id: string, enabled: boolean): Promise<void> => {
+  if (mutatingId.value) return
+  mutatingId.value = id
+  try {
+    await followApi.setEnabled(id, enabled)
+    actionError.value = ''
+    await fetchList()
+  } catch (error: unknown) {
+    actionError.value = extractMessage(error, '更新启用状态失败')
+  } finally {
+    mutatingId.value = null
+  }
+}
+
+const actionErrorMessage = computed<string>(() => (deleteTarget.value ? '' : actionError.value))
+
+const deleteModalErrorMessage = computed<string | null>(() => {
+  if (!deleteTarget.value || !actionError.value) return null
+  return actionError.value
+})
 
 function extractMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message
@@ -187,6 +242,15 @@ onMounted(() => {
       {{ formatCreateError(createError) }}
     </p>
 
+    <p
+      v-if="actionErrorMessage"
+      class="follow-list-panel__action-error"
+      data-testid="action-error"
+      role="alert"
+    >
+      {{ actionErrorMessage }}
+    </p>
+
     <ul v-if="sortedItems.length > 0" class="follow-list-panel__list">
       <li v-for="item in sortedItems" :key="item.id" class="follow-list-panel__item">
         <FollowCard
@@ -194,6 +258,7 @@ onMounted(() => {
           @remove="onRemove"
           @sync="onSync"
           @edit="onEdit"
+          @toggle="onToggle"
         >
           <template #health>
             <HealthBadge :status="item.health" />
@@ -206,6 +271,20 @@ onMounted(() => {
         </FollowCard>
       </li>
     </ul>
+
+    <ConfirmModal
+      :show="!!deleteTarget"
+      title="删除关注？"
+      :message="`确认删除 ${deleteTarget?.display_name ?? ''}？删除后不会再自动同步。`"
+      :error-message="deleteModalErrorMessage"
+      confirm-text="删除"
+      cancel-text="取消"
+      danger
+      :loading="!!mutatingId"
+      test-id-prefix="follow-delete-confirm"
+      @cancel="deleteTarget = null"
+      @confirm="onConfirmRemove"
+    />
   </section>
 </template>
 
@@ -240,6 +319,15 @@ onMounted(() => {
 }
 
 .follow-list-panel__create-error {
+  margin: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--status-red) 12%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--status-red);
+  font-size: 13px;
+}
+
+.follow-list-panel__action-error {
   margin: 0;
   padding: 8px 12px;
   background: color-mix(in srgb, var(--status-red) 12%, transparent);

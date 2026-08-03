@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 from aipulse.hotspot.models import Hotspot, Source
 from aipulse.store.database import reset_db
@@ -129,6 +130,14 @@ async def test_archive_hotspot_three_way_lands(
     assert data["obsidian_task_written"] is True
     assert data["errors"] == []
 
+    row = (
+        await db_session.execute(select(Hotspot).where(Hotspot.id == hotspot_id))
+    ).scalar_one()
+    assert row.status == "archived"
+    assert row.decision_status == "archived"
+    assert row.obsidian_summary_path == data["note_path"]
+    assert str(row.learning_event_id) == str(data["learning_event_id"])
+
     # 1. Obsidian note 真的写到 vault
     assert Path(data["note_path"]).read_text("utf-8").startswith("---")
 
@@ -141,8 +150,6 @@ async def test_archive_hotspot_three_way_lands(
     assert fake_reminders["reminders"][0]["list"] == "学习"
 
     # 4. learning_events 真行
-    from sqlalchemy import select
-
     from aipulse.models.learning_events import LearningEvent
 
     async with db_session.bind.connect() as _:

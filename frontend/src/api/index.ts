@@ -7,3 +7,4 @@
  */
 
 export * from './followedUp'
+export * from './hotspots'

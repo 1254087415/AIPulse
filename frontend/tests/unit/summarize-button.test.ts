@@ -150,6 +150,20 @@ describe('D7 SummarizeButton — click handler', () => {
       after.classes().some((c) => c.includes('summarize-btn--queued')),
     ).toBe(true)
     expect(after.attributes('disabled')).toBeDefined()
+    expect(after.text()).toContain('已入队 #2')
+    w.unmount()
+  })
+
+  it('renders queued text even when the server omits queue_position', async () => {
+    enqueueSpy().mockResolvedValueOnce({ job_id: 'job-no-position' })
+    const w = mountBtn()
+    await w.find('button').trigger('click')
+    await flushPromises()
+    await nextTick()
+    const btn = w.find('button')
+    expect(btn.classes().some((c) => c.includes('summarize-btn--queued'))).toBe(true)
+    expect(btn.text()).toContain('已入队')
+    expect(btn.text()).not.toContain('总结')
     w.unmount()
   })
 
@@ -208,6 +222,7 @@ describe('D7 SummarizeButton — SSE 5 event subscriptions', () => {
     const btn = w.find('button')
     expect(btn.classes().some((c) => c.includes('summarize-btn--running'))).toBe(true)
     expect(btn.attributes('aria-busy')).toBe('true')
+    expect(btn.text()).toContain('处理中')
     w.unmount()
   })
 

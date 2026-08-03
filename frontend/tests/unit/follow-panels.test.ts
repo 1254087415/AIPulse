@@ -6,6 +6,7 @@ const { apiFetchMock } = vi.hoisted(() => ({ apiFetchMock: vi.fn() }))
 vi.mock('../../src/lib/apiFetch', () => ({ apiFetch: apiFetchMock }))
 
 import { listSummaryJobs } from '../../src/api/summaryJobs'
+import { listHotspots } from '../../src/api/hotspots'
 import FollowRecordsPanel from '../../src/views/panels/FollowRecordsPanel.vue'
 import FollowUpcomingPanel from '../../src/views/panels/FollowUpcomingPanel.vue'
 import FollowFailedPanel from '../../src/views/panels/FollowFailedPanel.vue'
@@ -24,12 +25,23 @@ const job = (overrides = {}) => ({
 
 const hotspot = {
   id: 'hotspot-1',
-  content_id: 'BV1hot',
   title: '待学习视频',
-  source: 'bilibili',
+  url: 'https://www.bilibili.com/video/BV1hot',
+  content_id: 'BV1hot',
   up_name: 'UP 主',
+  source_type: 'bilibili_up',
+  summary: 'summary',
+  heat_score: 1.2,
+  importance: 'medium',
+  category: 'ai',
+  status: 'new',
   decision_status: 'pending',
+  notified: false,
+  obsidian_source_path: null,
+  obsidian_summary_path: null,
+  learning_event_id: null,
   created_at: '2026-07-26T08:00:00Z',
+  published_at: '2026-07-26T08:00:00Z',
 }
 
 describe('summary jobs API', () => {
@@ -47,21 +59,104 @@ describe('summary jobs API', () => {
   })
 })
 
+describe('hotspots API', () => {
+  beforeEach(() => apiFetchMock.mockReset())
+
+  it('lists hotspot records with the requested filter and sort', async () => {
+    apiFetchMock.mockResolvedValue({ success: true, data: [hotspot], meta: {} })
+
+    await listHotspots({
+      decisionStatus: 'pending,failed',
+      limit: 50,
+      page: 1,
+      sort: 'created_at',
+      order: 'desc',
+    })
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/hotspots', {
+      method: 'GET',
+      query: {
+        decision_status: 'pending,failed',
+        limit: '50',
+        page: '1',
+        sort: 'created_at',
+        order: 'desc',
+      },
+    })
+  })
+})
+
 describe('follow panels', () => {
   beforeEach(() => apiFetchMock.mockReset())
 
-  it('renders recent summary records and an empty state', async () => {
-    apiFetchMock.mockResolvedValue({ success: true, data: [job()] })
+  it('renders hotspot records and the status-driven action matrix', async () => {
+    apiFetchMock.mockResolvedValue({
+      success: true,
+      data: [
+        hotspot,
+        {
+          ...hotspot,
+          id: 'hotspot-2',
+          content_id: 'BV1learn',
+          title: '值得学习',
+          decision_status: 'worth_learning',
+          created_at: '2026-07-26T09:00:00Z',
+        },
+        {
+          ...hotspot,
+          id: 'hotspot-3',
+          content_id: 'BV1skip',
+          title: '已跳过',
+          decision_status: 'skipped',
+          created_at: '2026-07-26T10:00:00Z',
+        },
+        {
+          ...hotspot,
+          id: 'hotspot-4',
+          content_id: 'BV1fail',
+          title: '失败项',
+          decision_status: 'failed',
+          created_at: '2026-07-26T11:00:00Z',
+        },
+        {
+          ...hotspot,
+          id: 'hotspot-5',
+          content_id: 'BV1done',
+          title: '已归档',
+          decision_status: 'archived',
+          obsidian_summary_path: '/vault/AIPulse/BV1done.md',
+          created_at: '2026-07-26T12:00:00Z',
+        },
+      ],
+      meta: {},
+    })
     const wrapper = mount(FollowRecordsPanel)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('BV1abc')
-    expect(wrapper.text()).toContain('AI 入门')
-    expect(wrapper.findComponent({ name: 'SummarizeButton' }).exists()).toBe(true)
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/hotspots', {
+      method: 'GET',
+      query: {
+        decision_status: 'pending,worth_learning,skipped,failed,archived,worth_notified',
+        limit: '50',
+        page: '1',
+        sort: 'created_at',
+        order: 'desc',
+      },
+    })
+    expect(wrapper.text()).toContain('待学习视频')
+    expect(wrapper.text()).toContain('值得学习')
+    expect(wrapper.text()).toContain('已归档')
+    expect(wrapper.find('[data-testid="process-hotspot-1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="skip-hotspot-1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="archive-hotspot-2"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="notify-hotspot-2"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="force-archive-hotspot-3"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="retry-hotspot-4"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="view-note-hotspot-5"]').exists()).toBe(true)
     wrapper.unmount()
   })
 
-  it('renders pending hotspots from the hotspots endpoint', async () => {
+  it('renders pending hotspots in the upcoming panel', async () => {
     apiFetchMock.mockResolvedValue({ success: true, data: [hotspot], meta: {} })
     const wrapper = mount(FollowUpcomingPanel)
     await flushPromises()
@@ -72,6 +167,31 @@ describe('follow panels', () => {
     })
     expect(wrapper.text()).toContain('待学习视频')
     expect(wrapper.findComponent({ name: 'SummarizeButton' }).exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('skips a hotspot through the real PATCH endpoint', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce({ success: true, data: [hotspot], meta: {} })
+      .mockResolvedValueOnce({
+        success: true,
+        data: { ...hotspot, decision_status: 'skipped' },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ ...hotspot, decision_status: 'skipped' }],
+        meta: {},
+      })
+    const wrapper = mount(FollowRecordsPanel)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="skip-hotspot-1"]').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/hotspots/hotspot-1', {
+      method: 'PATCH',
+      body: '{"decision_status":"skipped"}',
+    })
     wrapper.unmount()
   })
 

@@ -127,6 +127,7 @@ async def test_notify_hotspot_success(
     )
     hs = await db_session.get(Hotspot, hotspot_id)
     assert hs.notified is True
+    assert hs.decision_status == "worth_notified"
 
 
 @pytest.mark.integration
@@ -189,3 +190,7 @@ async def test_notify_hotspot_with_no_configured_strategies(
     body = response.json()
     assert body["data"]["notified"] is True
     assert body["data"]["sent_to"] == []
+    hs = await db_session.get(Hotspot, hotspot_id)
+    assert hs is not None
+    assert hs.notified is True
+    assert hs.decision_status == "worth_notified"

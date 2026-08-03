@@ -8,6 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_seri
 
 from aipulse.core.datetime_utils import format_iso_utc
 
+DecisionStatusStr = Annotated[
+    str,
+    Field(pattern=r"^(pending|worth_learning|worth_notified|skipped|failed|archived)$"),
+]
+
 
 class HotspotOut(BaseModel):
     """Output schema for a single hotspot."""
@@ -19,10 +24,25 @@ class HotspotOut(BaseModel):
     url: str
     summary: str | None
     source_type: str
+    content_id: str | None = None
+    up_name: str | None = None
     heat_score: float
     importance: str
     category: str | None
+    status: str
+    decision_status: str
+    notified: bool
+    obsidian_source_path: str | None = None
+    obsidian_summary_path: str | None = None
+    learning_event_id: str | None = None
+    created_at: datetime
     published_at: datetime | None
+
+
+class HotspotUpdate(BaseModel):
+    """Partial update schema for a hotspot decision."""
+
+    decision_status: DecisionStatusStr | None = None
 
 
 class HotspotListResponse(BaseModel):

@@ -66,18 +66,15 @@ const jobId = ref<string | null>(null)
 const label = computed(() => {
   if (status.value === 'done') return '查看总结'
   if (status.value === 'failed') return '重试'
+  if (status.value === 'pending') return '提交中…'
   if (status.value === 'queued' && queuePosition.value !== null) {
     return `已入队 #${queuePosition.value}`
   }
-  if (
-    (status.value === 'running' ||
-      status.value === 'pending' ||
-      status.value === 'queued') &&
-    currentStep.value
-  ) {
+  if (status.value === 'queued') return '已入队'
+  if (status.value === 'running' && currentStep.value) {
     return `处理中 · ${currentStep.value}`
   }
-  if (status.value === 'pending') return '提交中…'
+  if (status.value === 'running') return '处理中…'
   return '总结'
 })
 

@@ -10,13 +10,13 @@ import FollowRecordsPanel from '../../views/panels/FollowRecordsPanel.vue'
 
 const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
-  listSummaryJobs: vi.fn(),
+  listHotspots: vi.fn(),
 }))
 
 vi.mock('../../lib/apiFetch', () => ({ apiFetch: mocks.apiFetch }))
-vi.mock('../../api/summaryJobs', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../api/summaryJobs')>()
-  return { ...original, listSummaryJobs: mocks.listSummaryJobs }
+vi.mock('../../api/hotspots', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../api/hotspots')>()
+  return { ...original, listHotspots: mocks.listHotspots }
 })
 vi.mock('../../lib/sse-client', () => ({ subscribeSse: () => () => undefined }))
 
@@ -55,7 +55,7 @@ function mountView(component: Parameters<typeof mount>[0]) {
 describe('StatusBadge integrations', () => {
   beforeEach(() => {
     mocks.apiFetch.mockReset()
-    mocks.listSummaryJobs.mockReset()
+    mocks.listHotspots.mockReset()
   })
 
   it('uses badges for platform, enabled state, and health on followed cards', () => {
@@ -89,17 +89,55 @@ describe('StatusBadge integrations', () => {
     expect(wrapper.text()).toContain('30 分钟')
   })
 
-  it('uses warning and danger badges for partial and failed records', async () => {
-    mocks.listSummaryJobs.mockResolvedValue([
-      { id: 'job-1', video_id: 'BV1', title: '部分任务', up_name: 'UP', status: 'partial', error: null, note_path: null, created_at: '2026-07-24T11:05:00' },
-      { id: 'job-2', video_id: 'BV2', title: '失败任务', up_name: 'UP', status: 'failed', error: 'error', note_path: null, created_at: null },
+  it('uses warning and danger badges for pending and failed records', async () => {
+    mocks.listHotspots.mockResolvedValue([
+      {
+        id: 'hotspot-1',
+        title: '待处理热点',
+        url: 'https://www.bilibili.com/video/BV1aaa',
+        content_id: 'BV1aaa',
+        up_name: 'UP',
+        summary: null,
+        source_type: 'bilibili_up',
+        heat_score: 12,
+        importance: 'medium',
+        category: '模型',
+        status: 'new',
+        decision_status: 'pending',
+        notified: false,
+        obsidian_source_path: null,
+        obsidian_summary_path: null,
+        learning_event_id: null,
+        created_at: '2026-07-24T11:05:00',
+        published_at: '2026-07-24T10:05:00',
+      },
+      {
+        id: 'hotspot-2',
+        title: '失败热点',
+        url: 'https://www.bilibili.com/video/BV1bbb',
+        content_id: 'BV1bbb',
+        up_name: 'UP',
+        summary: null,
+        source_type: 'bilibili_up',
+        heat_score: 8,
+        importance: 'low',
+        category: '模型',
+        status: 'new',
+        decision_status: 'failed',
+        notified: false,
+        obsidian_source_path: null,
+        obsidian_summary_path: null,
+        learning_event_id: null,
+        created_at: '2026-07-24T11:10:00',
+        published_at: '2026-07-24T10:10:00',
+      },
     ])
     const wrapper = mountView(FollowRecordsPanel)
     await flushPromises()
 
     const badges = wrapper.findAllComponents(StatusBadge)
     expect(badges.map((badge) => badge.props('tone'))).toEqual(['warning', 'danger'])
-    expect(badges.map((badge) => badge.text())).toEqual(['部分完成', '失败'])
+    expect(badges.map((badge) => badge.text())).toEqual(['等待处理', '失败'])
     expect(wrapper.text()).toContain('2026-07-24 11:05')
   })
 
