@@ -232,6 +232,7 @@ skills-lock.json
 
 # Playwright MCP / agent tool artifacts
 .playwright-mcp/
+.playwright-cli/
 .agnes/
 .codex/
 
