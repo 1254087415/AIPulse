@@ -6,12 +6,14 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aipulse.hotspot.schemas import (
     DailyDigestOut,
     GenerateDigestRequest,
     HotspotOut,
+    HotspotUpdate,
     KeywordCreate,
     KeywordOut,
     KeywordUpdate,
@@ -50,6 +52,9 @@ from aipulse.hotspot.service import (
     list_sources as list_sources_service,
 )
 from aipulse.hotspot.service import (
+    update_hotspot as update_hotspot_service,
+)
+from aipulse.hotspot.service import (
     update_keyword as update_keyword_service,
 )
 from aipulse.hotspot.service import (
@@ -84,6 +89,7 @@ async def list_hotspots_route(
     source: Annotated[str, Query(max_length=64)] = "",
     importance: Annotated[str, Query(max_length=64)] = "",
     category: Annotated[str, Query(max_length=64)] = "",
+    decision_status: Annotated[str, Query(max_length=128)] = "",
     sort: Annotated[str, Query(max_length=64)] = "",
     order: Annotated[str, Query(max_length=64)] = "",
     page: Annotated[int, Query(ge=1, le=1000)] = 1,
@@ -96,11 +102,13 @@ async def list_hotspots_route(
         source=source,
         importance=importance,
         category=category,
+        decision_status=decision_status,
         sort=sort,
         order=order,
         page=page,
         limit=limit,
     )
+    await _attach_hotspot_context(session, items)
     return {
         "success": True,
         "data": [HotspotOut.model_validate(item) for item in items],
@@ -117,6 +125,7 @@ async def get_hotspot_route(
     hotspot = await get_hotspot_service(session, hotspot_id)
     if hotspot is None:
         raise HTTPException(status_code=404, detail="Hotspot not found")
+    await _attach_hotspot_context(session, [hotspot])
     return {"success": True, "data": HotspotOut.model_validate(hotspot)}
 
 
@@ -174,6 +183,19 @@ async def archive_hotspot_route(
         scheduled_at=scheduled_at,
         topic=topic,
     )
+    if outcome.note_path:
+        await update_hotspot_service(
+            session,
+            hotspot_id,
+            {
+                "status": "archived",
+                "decision_status": "archived",
+                "obsidian_summary_path": outcome.note_path,
+                "learning_event_id": str(outcome.learning_event_id)
+                if outcome.learning_event_id is not None
+                else None,
+            },
+        )
     return {
         "success": True,
         "data": {
@@ -184,6 +206,24 @@ async def archive_hotspot_route(
             "errors": outcome.errors,
         },
     }
+
+
+@router.patch("/hotspots/{hotspot_id}")
+async def update_hotspot_route(
+    hotspot_id: str,
+    payload: HotspotUpdate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Update hotspot decision metadata."""
+    updated = await update_hotspot_service(
+        session,
+        hotspot_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Hotspot not found")
+    await _attach_hotspot_context(session, [updated])
+    return {"success": True, "data": HotspotOut.model_validate(updated)}
 
 
 @router.post("/hotspots/{hotspot_id}/notify")
@@ -257,6 +297,7 @@ async def notify_hotspot_route(
             sent_to.append(type(strategy).__name__)
 
     hotspot.notified = True
+    hotspot.decision_status = "worth_notified"
     await session.commit()
 
     return {
@@ -266,6 +307,39 @@ async def notify_hotspot_route(
             "notified": True,
             "sent_to": sent_to,
             "title": hotspot.title,
+        },
+    }
+
+
+@router.post("/agent/retry/{hotspot_id}", status_code=202)
+async def retry_hotspot_route(
+    hotspot_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Retry a failed hotspot by resetting it to pending and enqueueing summary."""
+    from aipulse.api.summary import enqueue_summary_route
+    from aipulse.hotspot.models import Hotspot
+
+    hotspot = await session.get(Hotspot, hotspot_id)
+    if hotspot is None:
+        raise HTTPException(status_code=404, detail="Hotspot not found")
+    if not hotspot.content_id:
+        raise HTTPException(status_code=409, detail="Hotspot has no content_id")
+
+    await update_hotspot_service(
+        session,
+        hotspot_id,
+        {
+            "decision_status": "pending",
+        },
+    )
+    result = await enqueue_summary_route(hotspot.content_id, session)
+    return {
+        "success": True,
+        "data": {
+            "hotspot_id": hotspot_id,
+            "video_id": hotspot.content_id,
+            **result["data"],
         },
     }
 
@@ -543,3 +617,25 @@ def _candidate_note(raw: str) -> str:
         "~/坚果云": "坚果云同步盘",
     }
     return notes.get(raw, "")
+
+
+async def _attach_hotspot_context(session: AsyncSession, hotspots: list[Any]) -> None:
+    """Enrich hotspot ORM rows with up_name for dashboard views."""
+    followed_up_ids = {
+        hotspot.followed_up_id
+        for hotspot in hotspots
+        if getattr(hotspot, "followed_up_id", None)
+    }
+    if not followed_up_ids:
+        return
+
+    from aipulse.models.followed_up import FollowedUp
+
+    rows = await session.execute(
+        select(FollowedUp.id, FollowedUp.display_name).where(FollowedUp.id.in_(followed_up_ids))
+    )
+    names = {row_id: display_name for row_id, display_name in rows.all()}
+    for hotspot in hotspots:
+        follow_id = getattr(hotspot, "followed_up_id", None)
+        if follow_id:
+            hotspot.up_name = names.get(follow_id)

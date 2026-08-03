@@ -16,13 +16,14 @@ ProfileUrlStr = Annotated[str, Field(min_length=1, max_length=256)]
 CollectorStrategyStr = Annotated[str, Field(pattern=r"^(uapi|html)$")]
 StatusStr = Annotated[str, Field(pattern=r"^(active|paused|auth_failed)$")]
 HealthStr = Annotated[str, Field(pattern=r"^(healthy|warning|error)$")]
-# Phase 8 A5 FIX: spec §3.0 / I7 — Hotspot.decision_status is one of exactly
-# five values. The DB stores it as a 16-char varchar; this schema-level
-# regex is the boundary check so collectors and scheduler jobs fail fast on
-# typos instead of silently writing garbage.
+# Phase 8 A5 FIX: spec §3.0 / I7 — Hotspot.decision_status is one of the
+# canonical values below; ``worth_notified`` is kept as a legacy alias while
+# the UI migrates to the current records flow. The DB stores it as a 16-char
+# varchar; this schema-level regex is the boundary check so collectors and
+# scheduler jobs fail fast on typos instead of silently writing garbage.
 DecisionStatusStr = Annotated[
     str,
-    Field(pattern=r"^(pending|worth_learning|worth_notified|skipped|failed)$"),
+    Field(pattern=r"^(pending|worth_learning|worth_notified|skipped|failed|archived)$"),
 ]
 
 
